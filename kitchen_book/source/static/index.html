@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>손끝 없이 · AI 레시피북 1.2.0</title><link rel="stylesheet" href="/style.css"></head>
+<body><header><a href="/" class="brand">손끝 없이 <span>AI RECIPE BOOK</span></a><span id="modeBadge">연결 중</span></header>
+<main>
+<nav class="stage-track" aria-label="요리 준비 단계"><span data-step="1">01 촬영</span><span data-step="2">02 재료 확인</span><span data-step="3">03 메뉴 선택</span><span data-step="4">04 요리 시작</span></nav>
+<div id="notice" role="status" aria-live="polite">서버에 연결하고 있습니다.</div>
+<section id="stage1" class="stage" aria-label="재료 촬영">
+ <div id="captureCameraSlot"><div id="cameraModule">
+ <div class="camera"><video id="video" autoplay playsinline muted></video><div id="cameraHint">웹캠을 켜고 재료를 가까이 보여 주세요</div><span class="live">LOCAL CAMERA</span></div>
+ <div class="row wrap"><button id="cameraStart">웹캠 켜기</button><button id="cameraStop" disabled>카메라 끄기</button></div></div></div>
+ <div class="capture-actions"><select id="captureArea" aria-label="촬영 범위"><option value="full">전체 화면 촬영</option><option value="center">가운데만 촬영 · 배경 줄이기</option></select><button id="capture" class="primary" disabled>사진 찍고 재료 찾기 →</button><button id="manualEntry">직접 입력 →</button></div>
+</section>
+<section id="stage2" class="stage" aria-label="재료 확인 및 수정" hidden>
+ <h1 tabindex="-1">사진과 비교하고, 재료를 확인해 주세요.</h1>
+ <div class="review-grid"><figure class="photo-box"><img id="photo" alt="분석에 사용한 촬영 사진" hidden><figcaption id="photoInfo">사진 없이 직접 재료를 입력할 수도 있어요.</figcaption></figure>
+ <div class="panel"><label for="ingredients">재료 이름 · 쉼표로 구분</label><textarea id="ingredients" rows="3" placeholder="예: 달걀, 토마토, 양파"></textarea>
+ <p id="uncertain" class="small"></p><details><summary>인식 근거 보기</summary><div id="evidence" class="evidence"></div></details>
+ <label class="check-row"><input id="reviewIngredients" type="checkbox">재료 목록을 확인하고 수정했어요</label>
+ <label for="request">요청 사항</label><input id="request" maxlength="600" placeholder="예: 2인분, 매운맛 없이, 20분 이내">
+ <div class="row wrap"><button id="recommend" class="primary" disabled>확인한 재료로 메뉴 추천 →</button><button id="voice">음성 요청</button></div><p class="small">음성 입력은 브라우저의 네트워크 서비스를 사용할 수 있습니다.</p></div></div>
+</section>
+<section id="stage3" class="stage" aria-label="메뉴 추천" hidden><h1 tabindex="-1">오늘은 어떤 요리를 할까요?</h1><p id="confirmedItems"></p><div id="menus" class="menus"></div><button id="retryMenus">메뉴 추천 다시 시도</button></section>
+<section id="stage4" class="stage book-area" aria-label="레시피북" hidden>
+<div class="book-toolbar"><h1 tabindex="-1">나의 레시피북</h1><div class="row"><button id="exportBook" disabled>저장</button><button id="importBook">불러오기</button><input id="importFile" type="file" accept="application/json" hidden></div></div>
+          <section class="panel gesture-panel"><div class="section-head"><h2>손동작 안내</h2><button id="gestureToggle">제스처 켜기</button></div>
+            <div class="gesture-state"><strong id="gestureName">대기 중</strong><span id="gestureMode">책 모드</span></div><progress id="holdProgress" max="1" value="0"></progress>
+            <div id="gestureCards" class="gesture-cards"></div><p id="gestureGuide" class="small"></p>
+            
+          </section>
+<div class="reader-grid">        <section class="book-pages">
+          <div id="book" class="book"><div class="empty"><span>✦</span><h2>오늘은 무엇을 만들까요?</h2><p>촬영한 재료를 확인한 뒤<br>추천 메뉴를 선택해 주세요.</p></div></div>
+          <nav class="pages"><button id="previous" disabled>← 이전</button><span id="pageLabel">레시피를 기다리는 중</span><button id="next" disabled>다음 →</button></nav>
+          <div id="bookFeedback" class="book-feedback" aria-live="polite">레시피가 준비되면 옆의 손동작 안내를 보며 요리하세요.</div>
+        </section>
+<aside class="companion"><section class="panel gesture-preview"><h2>제스처 확인 화면</h2><div id="gestureCameraSlot"></div></section>          <section id="timerPanel" class="timer-panel"><p class="eyebrow">COOKING TIMER</p><h2 id="timerTitle">요리 타이머</h2>
+            <p id="currentStepTime" class="step-time"></p><button id="loadCurrentTimer" disabled>이 단계 시간 설정</button>
+            <div id="clock" role="timer">00:00</div><p id="timerState">설정 대기</p><p id="timerSource" class="small">시간을 설정하세요.</p><p id="timerRunningHint" class="small"></p>
+            <details class="timer-manual"><summary>키보드로 시간 입력</summary>            <div class="row timer-edit"><label>분 <input id="minutes" type="number" min="0" max="1440" value="0"></label><label>초 <input id="seconds" type="number" min="0" max="59" value="0"></label></div><button id="setTimer">입력 시간 설정</button>
+</details>
+            <div class="row wrap"><button id="startTimer" class="primary">시작 / 재개</button><button id="pauseTimer">일시정지</button><button id="resetTimer">초기화</button><button id="minusTimer">−1분</button><button id="plusTimer">+1분</button></div>
+            <button id="timerMode">타이머 모드 열기</button><p id="increment">시간 조절 단위: 1분</p>
+            <p class="small">실행 중인 타이머는 페이지를 넘겨도 유지됩니다. 알림을 받으려면 이 페이지를 열어 두세요.</p>
+          </section>
+</aside></div></section>
+<button id="backButton" class="back-button" hidden>← 뒤로</button>
+</main><script src="/core.js"></script><script src="/app.js"></script></body></html>

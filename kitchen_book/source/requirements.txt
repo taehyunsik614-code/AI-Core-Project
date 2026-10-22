@@ -1,0 +1,7 @@
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+--only-binary=llama-cpp-python
+# Reference training environment: Python 3.12
+Pillow>=10.4,<13
+numpy>=1.26,<3
+mediapipe==1.0.1
+llama-cpp-python==0.3.34
