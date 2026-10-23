@@ -11,11 +11,11 @@ const jpeg=fs.readFileSync(path.join(__dirname,'camera_fixture.jpg')).toString('
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const wait=async(fn)=>{for(let i=0;i<150;i++){if(fn())return;await sleep(50);}throw Error('Timed out waiting for DOM condition');};
 (async()=>{
- const errors=[];let pose='None';
+ const errors=[];let pose='None',fingers=0;
  const virtualConsole=new VirtualConsole();virtualConsole.on('jsdomError',e=>errors.push(e.message));
  const dom=await JSDOM.fromURL(origin,{resources:'usable',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole,beforeParse(w){
    w.scrollTo=()=>{};
-   w.fetch=(url,options)=>url==='/api/gesture'?Promise.resolve({ok:true,json:async()=>({gesture:pose,score:pose==='None'?0:.99})}):fetch(new URL(url,origin),options);
+   w.fetch=(url,options)=>url==='/api/gesture'?Promise.resolve({ok:true,json:async()=>({gesture:pose,score:pose==='None'?0:.99,hand_present:pose!=='None',fingers})}):fetch(new URL(url,origin),options);
    w.HTMLMediaElement.prototype.play=async function(){};
    Object.defineProperties(w.HTMLVideoElement.prototype,{videoWidth:{get:()=>640},videoHeight:{get:()=>480}});
    Object.defineProperty(w.navigator,'mediaDevices',{value:{getUserMedia:async()=>({getTracks:()=>[{stop(){}}],getVideoTracks:()=>[{addEventListener(){}}]})}});
@@ -64,6 +64,24 @@ const wait=async(fn)=>{for(let i=0;i<150;i++){if(fn())return;await sleep(50);}th
  assert.equal($('gestureMode').textContent,'타이머 모드');
  w.dispatchGesture('Pointing_Up');assert.equal($('clock').textContent,'05:00');
  w.dispatchGesture('Thumb_Up');assert.ok($('timerState').textContent.includes('작동 중'));w.dispatchGesture('Thumb_Down');
+ // F302/R5: actual input -> HTTP job -> validated tool -> timer/page UI.
+ const command=async text=>{$('commandInput').value=text;$('sendCommand').click();await wait(()=>!$('sendCommand').disabled);return JSON.parse($('commandLog').textContent);};
+ let output=await command('타이머 설정');assert.equal(output.tool,'ask');
+ output=await command('3분');assert.equal(output.tool,'timer');assert.equal($('clock').textContent,'03:00');
+ output=await command('타이머 시작');assert.ok($('timerState').textContent.includes('작동 중'));
+ output=await command('타이머 일시정지');assert.ok($('timerState').textContent.includes('일시정지'));
+ output=await command('이전 페이지');assert.equal(output.args.direction,'previous');
+ // F306: stable current hand evidence, text overrides contradictory hand.
+ $('combineGesture').checked=true;
+ w.eval("lastGesture={name:'Thumb_Down',score:.99,stable:true,at:performance.now(),mode:'book'}");
+ output=await command('다음 페이지');assert.equal(output.args.direction,'next');
+ w.eval("lastGesture={name:'Thumb_Down',score:.99,stable:true,at:performance.now(),mode:'book'}");
+ output=await command('이쪽으로 1페이지');assert.equal(output.args.direction,'previous');
+ $('combineGesture').checked=false;
+ // F305: recognizer response -> sequence state -> release -> actual timer.
+ w.eval('timerMode=false;renderMode();');$('gestureToggle').click();
+ pose='ILoveYou';await sleep(1400);pose='Victory';fingers=2;await sleep(1200);pose='None';fingers=0;await sleep(900);
+ assert.equal($('clock').textContent,'02:00');assert.equal($('gestureMode').textContent,'타이머 모드');$('gestureToggle').click();
  // Larger guide is structurally beside the book, with mode-specific labels.
  assert.equal($('gestureCards').closest('.book-area'),$('book').closest('.book-area'));
  assert.equal($('gestureCards').children.length,7);
@@ -77,6 +95,6 @@ const wait=async(fn)=>{for(let i=0;i<150;i++){if(fn())return;await sleep(50);}th
  $('ingredients').value='수정한 재료';$('ingredients').dispatchEvent(new w.Event('input'));
  assert.equal($('reviewIngredients').checked,false);assert.equal($('recommend').disabled,true);
  assert.deepEqual(errors,[]);
- console.log('PASS: DOM initialization, fake webcam capture, menu/recipe jobs, seven gesture routes through polling, step timer loading by fist, timer expiry/persistence, page navigation. Rendering and physical recognition not tested.');
+ console.log('PASS: DOM initialization, fake webcam capture, menu/recipe jobs, seven gesture routes through polling, step timer loading by fist, timer expiry/persistence, page navigation. Also F305 timer sequence, R5 follow-up and F306 text/hand conflict through actual HTTP. Rendering and physical recognition not tested.');
  }finally{dom.window.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

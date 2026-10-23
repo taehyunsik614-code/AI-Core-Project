@@ -1,2 +1,1 @@
-# Fixed examples, without VLM/LLM. Actual gestures require full requirements.
-Pillow>=10.4,<13
+-r requirements-test.txt

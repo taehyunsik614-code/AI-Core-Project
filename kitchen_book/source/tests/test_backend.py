@@ -16,7 +16,12 @@ from PIL import Image
 import config
 import schema
 from ai import decode_image, KitchenAI
-from app import Jobs, make_handler
+from app import Jobs, create_app
+from fastapi.testclient import TestClient
+
+_DETECTOR_PATCH = patch.object(config, 'DETECTOR', 'vlm')
+def setUpModule(): _DETECTOR_PATCH.start()
+def tearDownModule(): _DETECTOR_PATCH.stop()
 
 class SchemaTests(unittest.TestCase):
     def test_fenced_and_thinking_json(self):
@@ -198,25 +203,20 @@ class JobTests(unittest.TestCase):
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server=ThreadingHTTPServer(('127.0.0.1',0),make_handler(demo=True))
-        cls.thread=threading.Thread(target=cls.server.serve_forever,daemon=True)
-        cls.thread.start()
-        cls.url=f'http://127.0.0.1:{cls.server.server_port}'
+        cls.client=TestClient(create_app(demo=True))
+        cls.client.__enter__()
         cls.csrf=cls.call('/api/health')['csrf']
 
     @classmethod
     def tearDownClass(cls):
-        cls.server.shutdown()
-        cls.server.server_close()
-        cls.thread.join()
+        cls.client.__exit__(None,None,None)
 
     @classmethod
     def call(cls,path,payload=None,csrf=True):
-        headers={'Content-Type':'application/json'}
-        if payload is not None and csrf:headers['X-Kitchen-Token']=cls.csrf
-        req=Request(cls.url+path, data=json.dumps(payload).encode() if payload is not None else None,headers=headers)
-        with urlopen(req,timeout=5) as response:
-            return json.load(response)
+        headers={'X-Kitchen-Token':cls.csrf} if payload is not None and csrf else {}
+        response=cls.client.get(path) if payload is None else cls.client.post(path,json=payload,headers=headers)
+        if response.status_code>=400: raise HTTPError(path,response.status_code,response.text,{},None)
+        return response.json()
 
     def job(self,path,payload):
         job_id=self.call(path,payload)['job_id']

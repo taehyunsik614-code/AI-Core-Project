@@ -1,12 +1,14 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const {Timer,GestureGate,timeText,normalizeRecipe}=KitchenCore;
+const {Timer,GestureGate,TimerSequence,timeText,normalizeRecipe}=KitchenCore;
 const STORE='handsfree-kitchen-v1';
 let token='',demo=false,busy=false,stream=null,gestureOn=false,gesturePending=false;
 let recipe=null,page=0,menus=[],timerMode=false,incrementIndex=2,timerSource='직접 설정';
 let timerPageKey='',reviewed=false;
 let timer=new Timer(),gate=new GestureGate(),audio=null,recognition=null;
 let stage=1;
+let commandHistory=[],lastGesture=null,commandInFlight=false,sequence=new TimerSequence();
+let commandEpoch=0;
 const increments=[1,10,60,300];
 const names={Thumb_Up:'👍 엄지 위',Thumb_Down:'👎 엄지 아래',Victory:'✌️ V',Closed_Fist:'✊ 주먹',Pointing_Up:'☝️ 검지',Open_Palm:'🖐 손바닥',ILoveYou:'🤟 I Love You',None:'손을 보여 주세요'};
 function notice(text,error=false){$('notice').textContent=text;$('notice').className=error?'error':'';if($('bookFeedback')){$('bookFeedback').textContent=text;$('bookFeedback').classList.toggle('error',!!error);}}
@@ -18,7 +20,7 @@ function validRecipe(x){
 }
 function restore(){try{const data=JSON.parse(localStorage.getItem(STORE)||'null');if(!data)return;data.recipe=normalizeRecipe(data.recipe);if(validRecipe(data.recipe)){recipe=data.recipe;page=Math.max(0,Math.min(recipe.steps.length,Number.isInteger(data.page)?data.page:0));}timer=new Timer(data.timer||{});timerPageKey=typeof data.timerPageKey==='string'?data.timerPageKey:'';timerSource=typeof data.timerSource==='string'?data.timerSource:'복원된 타이머';$('ingredients').value=typeof data.ingredients==='string'?data.ingredients:'';$('request').value=typeof data.request==='string'?data.request:'';}catch(e){notice('저장된 상태를 복원하지 못했습니다.',true);}}
 function showStage(next){
- stage=next;
+ stage=next;commandEpoch++;commandHistory=[];sequence.reset();lastGesture=null;
  for(let n=1;n<=4;n++)$('stage'+n).hidden=n!==next;
  document.querySelectorAll('[data-step]').forEach(el=>el.classList.toggle('active',Number(el.dataset.step)===next));
  $('backButton').hidden=next===1;
@@ -38,7 +40,7 @@ function setBusy(value){busy=value;$('capture').disabled=busy||!stream;$('recomm
 async function aiJob(kind,payload){
  if(busy)throw Error('AI 작업이 진행 중입니다.');setBusy(true);
  try{
-   const {job_id}=await request('/api/'+kind,payload);
+   const {job_id}=await request(kind==='intent'?'/api/llm-answer':'/api/'+kind,payload);
    // Inference may take minutes on CPU. Keep polling; do not silently submit duplicates.
    const started=Date.now();
    while(true){
@@ -46,7 +48,7 @@ async function aiJob(kind,payload){
      const job=await request('/api/jobs/'+job_id);
      if(job.status==='done')return job.result;
      if(job.status==='error')throw Error(job.error);
-     notice(`로컬 AI가 ${kind==='ingredients'?'재료를 확인':kind==='menus'?'메뉴를 추천':'레시피북을 작성'}하고 있습니다. ${Math.floor((Date.now()-started)/1000)}초 경과 · 첫 실행에는 모델 로딩이 포함됩니다.`);
+     notice(`로컬 AI가 ${kind==='ingredients'?'재료를 확인':kind==='menus'?'메뉴를 추천':kind==='intent'?'명령을 해석':'레시피북을 작성'}하고 있습니다. ${Math.floor((Date.now()-started)/1000)}초 경과 · 첫 실행에는 모델 로딩이 포함됩니다.`);
    }
  }finally{setBusy(false);}
 }
@@ -65,11 +67,11 @@ async function startCamera(){try{
  $('video').srcObject=stream;await $('video').play();$('cameraHint').hidden=true;$('cameraStart').disabled=true;$('cameraStop').disabled=false;setBusy(busy);notice('재료를 카메라에 보여 주고 촬영하세요.');
  stream.getVideoTracks()[0].addEventListener('ended',stopCamera);
 }catch(e){stopCamera();notice('웹캠 연결 실패: '+e.message,true);}}
-function stopCamera(){gestureOn=false;gesturePending=false;gate.reset();if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}$('video').srcObject=null;$('cameraHint').hidden=false;$('cameraStart').disabled=false;$('cameraStop').disabled=true;$('gestureToggle').textContent='제스처 켜기';$('gestureName').textContent='대기 중';$('holdProgress').value=0;setBusy(busy);}
+function stopCamera(){sequence.reset();lastGesture=null;gestureOn=false;gesturePending=false;gate.reset();if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}$('video').srcObject=null;$('cameraHint').hidden=false;$('cameraStart').disabled=false;$('cameraStop').disabled=true;$('gestureToggle').textContent='제스처 켜기';$('gestureName').textContent='대기 중';$('holdProgress').value=0;setBusy(busy);}
 function resetReview(){reviewed=false;$('reviewIngredients').checked=false;menus=[];renderMenus();setBusy(busy);}
 async function capture(){try{
  if(busy)return;
- const image=cameraFrame(448,$('captureArea').value==='center');
+ const image=cameraFrame(1280,$('captureArea').value==='center');
  $('photo').src=image;$('photo').hidden=false;
  showStage(2);resetReview();$('ingredients').value='';$('uncertain').textContent='';$('evidence').replaceChildren();
  $('photoInfo').textContent='아래 촬영 사진이 모델에 전달됩니다. 인식 중…';
@@ -79,6 +81,7 @@ async function capture(){try{
  $('uncertain').textContent=result.uncertain.length?'확인 필요: '+result.uncertain.join(' / '):'사진과 재료 목록이 일치하는지 확인하세요.';
  for(const item of result.evidence||[]){$('evidence').append(element('p',item.name+' · '+item.evidence));}
  const info=result.image_info;
+ drawDetections(image,result.objects||[]);
  $('photoInfo').textContent=demo?'DEMO: 사진과 무관한 고정 예시입니다.':info?`분석 사진 ${info.width} × ${info.height} · ${result.verification_status==='unverified'?'재확인 미완료 후보':'인식 후보'} ${result.ingredients.length}개`:'촬영 사진을 확인하세요.';
  save();notice(demo?'DEMO: 고정 예시입니다. 실제 사진 인식은 일반 모드에서 실행하세요.':result.verification_status==='unverified'?'재확인을 완료하지 못했습니다. 표시된 재료는 미검증 후보입니다. 사진과 직접 비교하여 수정한 뒤 확인란을 체크하세요.':'인식은 확정 결과가 아닙니다. 사진과 비교하여 재료를 수정하고 아래 확인란을 체크하세요.');
 }catch(e){$('photoInfo').textContent='사진은 촬영됐지만 분석을 완료하지 못했습니다. 위 오류 내용을 확인하세요.';notice(e.message,true);}}
@@ -108,7 +111,7 @@ function renderBook(){
  }
  $('pageLabel').textContent=`${page+1} / ${recipe.steps.length+1} · ${page===0?'준비':page===recipe.steps.length?'마지막 단계':'조리 단계'}`;
 }
-function movePage(delta){if(!recipe)return;const next=Math.max(0,Math.min(recipe.steps.length,page+delta));if(next===page){notice(delta>0?'마지막 페이지입니다.':'첫 페이지입니다.');return;}page=next;prepareStepTimer();renderBook();renderTimer();save();}
+function movePage(delta){if(commandInFlight||!recipe)return;commandEpoch++;const next=Math.max(0,Math.min(recipe.steps.length,page+delta));if(next===page){notice(delta>0?'마지막 페이지입니다.':'첫 페이지입니다.');return;}page=next;prepareStepTimer();renderBook();renderTimer();save();}
 function stepKey(){return recipe&&page>0?recipe.title+'|'+page+'|'+recipe.steps[page-1].instruction:'';}
 function prepareStepTimer(){
  const key=stepKey();if(timer.running||key===timerPageKey)return;
@@ -117,6 +120,7 @@ function prepareStepTimer(){
  timer.set(step?step.timer_seconds:0);timerSource=step?step.title:'설정 대기';syncInputs();
 }
 function loadStepTimer(){
+ if(commandInFlight)return false;
  if(!recipe||page===0){notice('조리 단계 페이지에서 시간을 설정하세요.');return false;}
  if(timer.running){notice('기존 타이머가 실행 중입니다. 👎로 일시정지한 뒤 현재 단계 시간을 설정하세요.',true);return false;}
  const step=recipe.steps[page-1];timerPageKey=stepKey();
@@ -125,6 +129,7 @@ function loadStepTimer(){
  return true; // A no-time step must still allow hands-free timer setup mode.
 }
 function enterTimer(){
+ if(commandInFlight)return;
  timerMode=!timerMode;
  if(timerMode){prepareStepTimer();syncInputs();renderTimer();save();}
  renderMode();notice(timerMode?'타이머 모드: 👍 시작, 👎 일시정지, ☝️ 시간 증가, 🖐 감소, ✊ 초기화, 🤟 단위 변경, ✌️ 책 모드':'책 모드: 👍 다음 페이지, 👎 이전 페이지, ✌️ 타이머 모드, ✊ 이 단계 시간 설정');
@@ -133,7 +138,7 @@ function renderMode(){
  document.querySelector('.gesture-panel').classList.toggle('timer-guide',timerMode);$('gestureMode').textContent=timerMode?'타이머 모드':'책 모드';$('timerMode').textContent=timerMode?'책 모드로 돌아가기':'타이머 모드 열기';$('timerPanel').classList.toggle('active',timerMode);
  $('gestureGuide').textContent=timerMode?'약 0.9초 유지하세요. 다른 동작으로 바꾸면 새 명령을 받습니다. 같은 명령을 반복하려면 손을 잠시 내려 주세요.':'약 0.9초 유지하세요. ✊로 현재 단계 시간을 설정한 뒤 👍로 시작합니다. 같은 명령을 반복하려면 손을 내려 주세요.';
  $('increment').textContent='시간 조절 단위: '+({1:'1초',10:'10초',60:'1분',300:'5분'}[increments[incrementIndex]]);
- const items=timerMode?[['👍','시작 / 재개'],['👎','일시정지'],['✊','설정 시간으로 초기화'],['☝️','시간 +'],['🖐','시간 −'],['🤟','조절 단위 변경'],['✌️','책 모드로 돌아가기']]:[['👍','다음 페이지'],['👎','이전 페이지'],['✊','이 단계 시간 설정'],['✌️','타이머 모드 열기']];
+ const items=timerMode?[['👍','시작 / 재개'],['👎','일시정지'],['✊','설정 시간으로 초기화'],['☝️','시간 +'],['🖐','시간 −'],['🤟','조절 단위 변경'],['✌️','책 모드로 돌아가기']]:[['👍','다음 페이지'],['👎','이전 페이지'],['✊','이 단계 시간 설정'],['✌️','타이머 모드 열기'],['🤟','분 설정 시퀀스 (1~5분)']];
  $('gestureCards').replaceChildren();for(const [icon,label] of items){const card=element('div',undefined,'gesture-card');card.append(element('span',icon,'hand-icon'),element('strong',label));$('gestureCards').append(card);}
 }
 function syncInputs(){const left=Math.ceil(timer.left());$('minutes').value=Math.floor(left/60);$('seconds').value=left%60;}
@@ -150,6 +155,7 @@ function alarm(){
  for(let i=0;i<4;i++){const osc=audio.createOscillator(),gain=audio.createGain();osc.frequency.value=740;gain.gain.value=.14;osc.connect(gain);gain.connect(audio.destination);osc.start(audio.currentTime+i*.45);osc.stop(audio.currentTime+i*.45+.22);}
 }
 function timerAction(action,amount){
+ if(commandInFlight)return;commandEpoch++;
  if(action==='start'){unlockAudio();if(timer.left()<=0)prepareStepTimer();if(timer.left()<=0)return notice('먼저 타이머 시간을 설정하세요.',true);timer.start();}
  if(action==='pause')timer.pause();
  if(action==='reset')timer.reset();
@@ -157,6 +163,8 @@ function timerAction(action,amount){
  syncInputs();save();renderTimer();
 }
 function dispatchGesture(name){
+ if(commandInFlight)return;
+ if(name==='ILoveYou'&&!timerMode){sequence.begin(performance.now());gate.reset();notice('5초 안에 손가락 1~5개를 0.7초 유지한 뒤 손을 내려 주세요. 분 단위로 설정합니다.');return;}
  if(name==='Victory'){enterTimer();return;}
  if(!timerMode){if(name==='Thumb_Up')movePage(1);if(name==='Thumb_Down')movePage(-1);if(name==='Closed_Fist' && loadStepTimer()){timerMode=true;renderMode();}return;}
  if(name==='Thumb_Up')timerAction('start');
@@ -167,20 +175,30 @@ function dispatchGesture(name){
  if(name==='ILoveYou'){incrementIndex=(incrementIndex+1)%increments.length;renderMode();}
 }
 async function gestureLoop(){
- if(stage!==4||busy||!gestureOn||!stream||gesturePending)return;
+ if(stage!==4||busy||!gestureOn||!stream||gesturePending){if(busy){gate.reset();lastGesture=null;sequence.reset();}return;}
  gesturePending=true;
  try{
    const result=await request('/api/gesture',{image:cameraFrame(480)});
    if(stage!==4||busy||!gestureOn)return;
-   const name=result.gesture||'None';const gated=gate.feed(name,result.score,performance.now());
+   if(result.busy){gate.reset();lastGesture=null;return;}
+   const now=performance.now(),name=result.gesture||'None';
+   if(sequence.active){
+     const seq=sequence.feed(result.hand_present,result.fingers,now);
+     $('gestureName').textContent=seq.count?seq.count+'분 · 손을 내려 확정':'분 설정 · 손가락 1~5개';
+     if(seq.seconds){timer.set(seq.seconds);timerSource='손가락 시퀀스';timerPageKey=stepKey();timerMode=true;syncInputs();renderTimer();renderMode();save();gate.reset();notice(seq.seconds/60+'분 설정 완료. 👍로 시작하세요.');}
+     if(seq.cancelled){gate.reset();notice('시간 설정 시퀀스가 취소되었습니다. 다시 🤟를 보여 주세요.');}
+     return;
+   }
+   const gated=gate.feed(name,result.score,now);
+   lastGesture={name,score:result.score,stable:gated.progress===1,at:now,mode:timerMode?'timer':'book'};
    $('gestureName').textContent=(names[name]||name)+(gated.progress===1?' · 손을 내려 주세요':'');$('holdProgress').value=gated.progress;
-   if(gated.event)dispatchGesture(gated.event);
+   if(gated.event&&!$('combineGesture').checked)dispatchGesture(gated.event);
  }catch(e){gestureOn=false;gate.reset();$('gestureToggle').textContent='제스처 켜기';notice('제스처 인식 실패: '+e.message,true);}
  finally{gesturePending=false;}
 }
 function toggleGestures(){
  if(!stream)return notice('웹캠을 먼저 켜 주세요.',true);
- unlockAudio();gestureOn=!gestureOn;gate.reset();$('gestureToggle').textContent=gestureOn?'제스처 끄기':'제스처 켜기';$('holdProgress').value=0;
+ unlockAudio();gestureOn=!gestureOn;gate.reset();sequence.reset();lastGesture=null;$('gestureToggle').textContent=gestureOn?'제스처 끄기':'제스처 켜기';$('holdProgress').value=0;
  if(gestureOn)notice('제스처 인식 시작. 동작을 약 0.9초 유지하세요. 다른 동작도 유지하면 실행됩니다. 같은 동작을 반복하려면 손을 잠시 내려 주세요.');else $('gestureName').textContent='대기 중';
 }
 function configureVoice(){
@@ -197,7 +215,7 @@ async function importBook(event){try{const file=event.target.files[0];if(!file)r
 $('cameraStart').onclick=startCamera;$('cameraStop').onclick=stopCamera;$('capture').onclick=capture;$('recommend').onclick=recommend;
 $('previous').onclick=()=>movePage(-1);$('next').onclick=()=>movePage(1);$('gestureToggle').onclick=toggleGestures;$('timerMode').onclick=enterTimer;
 $('startTimer').onclick=()=>timerAction('start');$('pauseTimer').onclick=()=>timerAction('pause');$('resetTimer').onclick=()=>timerAction('reset');$('plusTimer').onclick=()=>timerAction('adjust',60);$('minusTimer').onclick=()=>timerAction('adjust',-60);
-$('setTimer').onclick=()=>{const min=Number($('minutes').value),sec=Number($('seconds').value);if(!Number.isInteger(min)||!Number.isInteger(sec)||min<0||sec<0||sec>59||min*60+sec>86400)return notice('0~24시간 범위로 분과 초를 입력하세요.',true);timer.set(min*60+sec);timerSource='직접 설정';timerPageKey=stepKey();save();renderTimer();};
+$('setTimer').onclick=()=>{if(commandInFlight)return;const min=Number($('minutes').value),sec=Number($('seconds').value);if(!Number.isInteger(min)||!Number.isInteger(sec)||min<0||sec<0||sec>59||min*60+sec>86400)return notice('0~24시간 범위로 분과 초를 입력하세요.',true);timer.set(min*60+sec);timerSource='직접 설정';timerPageKey=stepKey();save();renderTimer();};
 $('exportBook').onclick=exportBook;$('importBook').onclick=()=>$('importFile').click();$('importFile').onchange=importBook;
 $('ingredients').oninput=()=>{resetReview();save();};$('request').onchange=()=>{menus=[];renderMenus();save();};
 $('reviewIngredients').onchange=()=>{reviewed=$('reviewIngredients').checked;setBusy(busy);};
@@ -205,14 +223,52 @@ $('loadCurrentTimer').onclick=()=>{if(loadStepTimer()){timerMode=true;renderMode
 $('backButton').onclick=()=>{if(!busy){showStage(Math.max(1,stage-1));notice(stage===1?'재료를 다시 촬영할 수 있습니다.':stage===2?'재료와 요청을 수정한 뒤 다시 추천받으세요.':'다른 메뉴를 선택하세요.');}};
 $('manualEntry').onclick=()=>showStage(2);
 $('retryMenus').onclick=recommend;
-document.addEventListener('visibilitychange',()=>{gate.reset();if(document.hidden){$('holdProgress').value=0;}else renderTimer();});
+document.addEventListener('visibilitychange',()=>{gate.reset();lastGesture=null;sequence.reset();if(document.hidden){$('holdProgress').value=0;}else renderTimer();});
 setInterval(()=>{if(!document.hidden)gestureLoop();},150);
 setInterval(()=>{if(timer.tick()){alarm();notice('⏰ 타이머 완료: '+timerSource);save();}renderTimer();},200);
 async function initialize(){
  restore();showStage(1);configureVoice();prepareStepTimer();renderBook();renderMode();syncInputs();renderTimer();setBusy(false);
- try{const health=await request('/api/health');token=health.csrf;demo=health.demo;$('modeBadge').textContent=demo?'DEMO · 고정 예시':'LOCAL AI v1.2.0 · 내 PC에서 실행';
- const missing=Object.entries(health.models).filter(([,value])=>!value.exists).map(([key])=>key);
+ try{const health=await request('/api/health');token=health.csrf;demo=health.demo;$('modeBadge').textContent=demo?'DEMO · 고정 예시':'LOCAL AI v'+health.version+' · 내 PC에서 실행';
+ const needed=['llm','gesture',...(health.detector==='yolo'||(health.detector==='auto'&&health.models.yolo.exists)?['yolo']:['vlm','projector'])];
+ const missing=needed.filter(key=>!health.models[key].exists);
  notice(demo?'DEMO 모드입니다. 촬영·추천·생성 결과는 고정 예시이며 실제 모델 추론이 아닙니다. 제스처에는 실제 모델이 필요합니다.':missing.length?'모델 파일 확인 필요: '+missing.join(', ')+' · source/README.md를 확인하세요.':'준비되었습니다. 재료를 촬영하거나 직접 입력하세요.',!demo&&missing.length>0);
  }catch(e){notice('서버 연결 실패: '+e.message,true);}
 }
+$('sendCommand').onclick=sendCommand;
+$('commandInput').addEventListener('keydown',event=>{if(event.key==='Enter')sendCommand();});
+$('combineGesture').onchange=()=>{gate.reset();lastGesture=null;sequence.reset();};
 initialize();
+
+function drawDetections(image,objects){
+ if(!objects.length)return;
+ const img=new Image();img.onload=()=>{const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
+ const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);ctx.lineWidth=Math.max(2,img.width/320);ctx.font=Math.max(18,img.width/40)+'px sans-serif';
+ for(const obj of objects){const [x1,y1,x2,y2]=obj.box;ctx.strokeStyle=obj.accepted?'#00a57a':'#d78200';ctx.strokeRect(x1,y1,x2-x1,y2-y1);ctx.fillStyle='#102c25';ctx.fillText(obj.name+' '+Math.round(obj.confidence*100)+'%',x1,Math.max(22,y1-5));}
+ $('photo').src=canvas.toDataURL('image/jpeg',.92);};img.src=image;
+}
+function commandContext(){const step=recipe&&page>0?recipe.steps[page-1]:null;return {page,total_pages:recipe?recipe.steps.length+1:0,timer_seconds:Math.ceil(timer.left()),step_seconds:step?.timer_seconds||0,step_title:step?.title||'',step_instruction:step?.instruction||''};}
+async function sendCommand(){
+ if(busy||commandInFlight)return;
+ const prompt=$('commandInput').value.trim();if(!prompt)return notice('명령을 입력하세요.',true);
+ const epoch=commandEpoch;
+ const gesture=$('combineGesture').checked&&lastGesture?{...lastGesture,age_ms:performance.now()-lastGesture.at}:{};
+ commandInFlight=true;$('sendCommand').disabled=true;
+ try{
+   const result=await aiJob('intent',{prompt,context:commandContext(),history:commandHistory.slice(-10),gesture});
+   if(epoch!==commandEpoch)throw Error('화면이 바뀌어 이전 명령을 적용하지 않았습니다. 다시 요청해 주세요.');
+   commandInFlight=false;
+   commandHistory.push({role:'user',content:prompt},{role:'assistant',tool:result.tool,args:result.args,message:result.message});
+   commandHistory=commandHistory.slice(-10);
+   let applied=false;
+   if(result.tool==='page'){movePage((result.args.direction==='next'?1:-1)*result.args.steps);applied=true;}
+   if(result.tool==='timer'){
+     if(result.args.action==='set'){timer.set(result.args.seconds);timerSource='AI 명령';timerPageKey=stepKey();syncInputs();renderTimer();save();}
+     else timerAction(result.args.action,result.args.seconds);
+     applied=true;
+   }
+   $('commandReply').textContent=result.message+(applied?' · 현재 상태: '+$('pageLabel').textContent+' / '+timeText(timer.left())+' / '+$('timerState').textContent:'');
+   $('commandLog').textContent=JSON.stringify({...result,applied,actual:commandContext()},null,2);
+   $('commandInput').value='';
+ }catch(e){$('commandReply').textContent=e.message;notice(e.message,true);}
+ finally{commandInFlight=false;$('sendCommand').disabled=false;gate.reset();lastGesture=null;}
+}

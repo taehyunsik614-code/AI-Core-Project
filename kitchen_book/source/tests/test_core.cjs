@@ -44,3 +44,14 @@ test('stable different pose works without lowering the hand; held pose never rep
  assert.deepEqual(events,['Thumb_Up','Victory']);
  for(let n=2100;n<4000;n+=100)assert.equal(gate.feed('Victory',.99,n).event,null);
 });
+const {TimerSequence}=require('../static/core.js');
+test('F305 held fingers commit only after hand release; timeout and interruptions cancel',()=>{
+ const seq=new TimerSequence();seq.begin(0);
+ for(const t of [0,200,400,600,800])seq.feed(true,3,t);
+ assert.equal(seq.feed(false,0,1000).seconds,undefined);
+ assert.equal(seq.feed(false,0,1400).seconds,180);
+ assert.equal(seq.active,false);
+ seq.begin(2000);assert.equal(seq.feed(true,2,7001).cancelled,true);
+ seq.begin(8000);seq.feed(true,4,8000);seq.feed(true,4,9000);
+ assert.equal(seq.feed(false,0,9200).seconds,undefined);assert.equal(seq.feed(false,0,9600).seconds,undefined);
+});

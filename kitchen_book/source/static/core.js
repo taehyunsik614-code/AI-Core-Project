@@ -31,7 +31,7 @@ class GestureGate {
     // A stream interruption must never complete a hold.
     if(this.last!==null && now-this.last>650){this.candidate=null;this.since=now;}
     this.last=now;
-    if(!name || name==='None' || score<0.65){
+    if(!name || name==='None' || !Number.isFinite(score) || score<0.65 || score>1){
       this.candidate=null;
       if(this.neutralSince===null)this.neutralSince=now;
       if(now-this.neutralSince>=this.release)this.latched=false;
@@ -43,6 +43,29 @@ class GestureGate {
     const progress=Math.min(1,(now-this.since)/this.hold);
     if(progress>=1){this.latched=true;this.firedPose=name;return {event:name,progress};}
     return {event:null,progress};
+  }
+}
+// F305: enter with ILoveYou; hold 1..5 fingers; lower hand to commit minutes.
+class TimerSequence {
+  constructor(){this.reset();}
+  reset(){this.active=false;this.started=0;this.count=null;this.since=0;this.value=null;this.absent=null;this.last=null;}
+  begin(now){this.reset();this.active=true;this.started=now;}
+  feed(present,count,now){
+    if(!this.active)return {};
+    if(now-this.started>5000){this.reset();return {cancelled:true};}
+    if(this.last!==null&&now-this.last>650){this.count=null;this.since=now;this.absent=null;this.value=null;}
+    this.last=now;
+    if(!present){
+      this.count=null;
+      if(this.absent===null)this.absent=now;
+      if(this.value!==null&&now-this.absent>=400){const seconds=this.value*60;this.reset();return {seconds};}
+      return {};
+    }
+    this.absent=null;
+    if(!Number.isInteger(count)||count<1||count>5){this.count=null;return {};}
+    if(this.count!==count){this.count=count;this.since=now;this.value=null;}
+    if(now-this.since>=700)this.value=count;
+    return {count:this.value};
   }
 }
 // Match durations in generated and legacy recipe text. Separate actions are not summed.
@@ -73,7 +96,7 @@ function normalizeRecipe(value){
   })};
 }
 const timeText=s=>{s=Math.max(0,Math.ceil(s));const h=Math.floor(s/3600);return (h?h+':':'')+String(Math.floor(s/60)%60).padStart(2,'0')+':'+String(s%60).padStart(2,'0');};
-const api={Timer,GestureGate,timeText,durationFromText,normalizeRecipe};
+const api={Timer,GestureGate,TimerSequence,timeText,durationFromText,normalizeRecipe};
 if(typeof module!=='undefined' && module.exports)module.exports=api;
 else root.KitchenCore=api;
 })(globalThis);

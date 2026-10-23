@@ -1,0 +1,60 @@
+/root/.local/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+..Invalid vlm response (1/2): 모델이 완전한 JSON을 생성하지 못했습니다. 다시 시도하세요.; raw='not JSON'
+.....AI job failed
+Traceback (most recent call last):
+  File "/workspace/scratch/1ad43ebd4330/kitchen_book/source/jobs.py", line 29, in _work
+    result = self.ai.run(kind, payload)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/1ad43ebd4330/kitchen_book/source/tests/test_backend.py", line 185, in run
+    raise ValueError('모델 오류')
+ValueError: 모델 오류
+.................Invalid llm response (1/1): 모델이 완전한 JSON을 생성하지 못했습니다. 다시 시도하세요.; raw='incomplete {'
+........................
+----------------------------------------------------------------------
+Ran 48 tests in 0.214s
+
+OK
+✔ timer start/pause/resume/reset and absolute deadline (0.898139ms)
+✔ adjustment pauses and supports one-second through 24-hour limits (0.267385ms)
+✔ timer survives serialization and page state changes (0.182786ms)
+✔ gesture fires once, requires neutral hand release, and rejects low confidence (0.948806ms)
+✔ inference interruption cannot satisfy a hold (0.150298ms)
+✔ legacy recipe duration fallback matches Python corpus (1.047836ms)
+✔ stable different pose works without lowering the hand; held pose never repeats (0.167033ms)
+✔ F305 held fingers commit only after hand release; timeout and interruptions cancel (0.24471ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10.033232
+PASS A1.mode 
+PASS A1.screen 
+PASS A1.schema 
+PASS A3.invalid_image 
+PASS A4.empty_ingredients 
+PASS A5.empty_prompt 
+PASS A1.token 
+PASS A3.capture 
+PASS A4.generate 사용자 확인 재료 → 메뉴 → 레시피 JSON
+PASS A5.intent1 다음 2페이지
+PASS A5.intent2 이전 페이지
+PASS A5.intent3 타이머 3분 설정
+PASS A5.intent4 타이머 시작
+PASS A5.intent5 타이머 일시정지
+PASS A5.intent6 타이머 초기화
+PASS A5.intent7 타이머 설정
+PASS A5.intent8 현재 단계 설명해 줘
+PASS R5.continuation 
+PASS F306.conflict 
+PASS F306.hand 
+PASS F306.stale 
+PASS R1.parser 
+PASS R2.clamp 
+PASS R3.evidence 
+SKIP A2.gesture 실제 gesture 모델과 --image 필요. 실제 손 정확도는 별도 확인
+{"PASS": 24, "FAIL": 0, "SKIP": 1} /workspace/scratch/1ad43ebd4330/kitchen_book/docs/api_validation_demo.json
+PASS: DOM initialization, fake webcam capture, menu/recipe jobs, seven gesture routes through polling, step timer loading by fist, timer expiry/persistence, page navigation. Also F305 timer sequence, R5 follow-up and F306 text/hand conflict through actual HTTP. Rendering and physical recognition not tested.

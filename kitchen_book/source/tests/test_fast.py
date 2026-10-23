@@ -12,6 +12,10 @@ import config
 import schema
 import output_formats
 
+_DETECTOR_PATCH = patch.object(config, 'DETECTOR', 'vlm')
+def setUpModule(): _DETECTOR_PATCH.start()
+def tearDownModule(): _DETECTOR_PATCH.stop()
+
 class FastTests(unittest.TestCase):
     def test_single_pass_and_cache(self):
         ai=KitchenAI();calls=[]

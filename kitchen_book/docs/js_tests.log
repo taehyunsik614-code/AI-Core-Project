@@ -1,0 +1,16 @@
+✔ timer start/pause/resume/reset and absolute deadline (0.899773ms)
+✔ adjustment pauses and supports one-second through 24-hour limits (0.163968ms)
+✔ timer survives serialization and page state changes (0.159592ms)
+✔ gesture fires once, requires neutral hand release, and rejects low confidence (0.752529ms)
+✔ inference interruption cannot satisfy a hold (0.142035ms)
+✔ legacy recipe duration fallback matches Python corpus (0.955227ms)
+✔ stable different pose works without lowering the hand; held pose never repeats (0.170959ms)
+✔ F305 held fingers commit only after hand release; timeout and interruptions cancel (0.239132ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10.178746

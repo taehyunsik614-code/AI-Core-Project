@@ -1,0 +1,4 @@
+# Existing working training / llama / MediaPipe environment: add these only.
+fastapi==0.161.1
+uvicorn==0.54.0
+ultralytics>=8.3,<9

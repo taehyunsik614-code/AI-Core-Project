@@ -1,0 +1,34 @@
+# Python virtual environments
+.venv/
+.venv-yolo/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# AI models
+models/
+*.gguf
+*.pt
+*.task
+
+# Training outputs
+runs/
+weights/
+training/
+
+# Local settings
+.env
+.env.*
+
+# Backup
+source_backup/
+
+# Parent directory environments and training outputs
+/.venv-yolo/
+/.vscode/
+/runs/
+/training/
+/weights/
