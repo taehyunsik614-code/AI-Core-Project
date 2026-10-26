@@ -1,26 +1,18 @@
-/* Start the demo server on port 8765. Optional: npm install --no-save playwright */
-const {chromium}=require('playwright');
-const assert=require('node:assert/strict');
-(async()=>{
- const browser=await chromium.launch({headless:true,executablePath:process.env.KITCHEN_BROWSER||undefined,args:JSON.parse(process.env.KITCHEN_BROWSER_ARGS||'[]')});
- try{
-  const page=await browser.newPage();await page.goto(process.env.KITCHEN_TEST_URL||'http://127.0.0.1:8765');
-  await page.waitForFunction(()=>document.getElementById('modeBadge').textContent.includes('DEMO'));
-  if(process.env.KITCHEN_FONT_CSS){await page.addStyleTag({content:require('fs').readFileSync(process.env.KITCHEN_FONT_CSS,'utf8')});await page.evaluate(()=>document.fonts.ready);}
-  await page.evaluate(()=>{
-   recipe=normalizeRecipe({title:'토마토 달걀볶음',ingredients:['달걀 2개'],notes:[],steps:[{title:'달걀 볶기',instruction:'달걀을 부드럽게 저어 3분간 충분히 익혀 주세요.'}]});
-   showStage(4);page=1;prepareStepTimer();renderBook();renderMode();timer.set(86400);renderTimer();
-  });
-  for(const width of [1920,1440,1280,1024,768,390]){
-   await page.setViewportSize({width,height:1080});
-   for(const focus of [false]){
-    await page.evaluate(f=>document.body.classList.toggle('cooking-focus',f),focus);
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`horizontal overflow: width=${width}, focus=${focus}`);
-    assert.ok(await page.locator('#gestureCards').isVisible());
-    const [guide,book]=await Promise.all([page.locator('#gestureCards').boundingBox(),page.locator('#book').boundingBox()]);
-    assert.ok(guide.y<book.y,'Gesture cards should sit immediately above the recipe');
-   }
-  }
-  console.log('PASS: 1920/1440/1280/1024/768/390px, recipe stage, long 24-hour clock, gesture guide placement, no horizontal overflow.');
- }finally{await browser.close();}
-})().catch(e=>{console.error(e);process.exit(1);});
+/* Run demo server on 8765. Playwright checks viewport containment and lossless pagination. */
+const {chromium}=require('playwright');const assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({headless:true,executablePath:process.env.KITCHEN_BROWSER||undefined,args:JSON.parse(process.env.KITCHEN_BROWSER_ARGS||'[]')});try{
+ const p=await browser.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));await p.goto(process.env.KITCHEN_TEST_URL||'http://127.0.0.1:8765');await p.waitForFunction(()=>document.querySelector('#modeBadge').textContent.includes('DEMO'));await p.evaluate(()=>document.fonts.ready);
+ await p.evaluate(()=>{recipe=normalizeRecipe({title:'토마토 달걀볶음',ingredients:['달걀 2개','토마토 1개','대파 1/4대','식용유 1큰술','소금 약간'],notes:['재료가 충분히 익었는지 확인하세요.'],steps:[{title:'달걀 볶기',instruction:'팬에 기름을 두르고 달걀을 저어 충분히 익힌 뒤 잠시 덜어 둡니다. 3분간 조리하며 익힘 상태를 확인하세요.',timer_seconds:180}]});page=1;menus=[1,2,3].map(id=>({id:String(id),name:['토마토 달걀볶음','대파 달걀볶음밥','토마토 달걀국'][id-1],reason:'부드러운 달걀과 신선한 채소를 함께 즐길 수 있는 간단한 요리입니다.',missing:['식용유','소금']}));renderMenus();evidenceTexts=['달걀 · 흰 껍질의 타원형 재료가 보입니다.','대파 · 길쭉한 녹색 잎이 보입니다.'];$('ingredients').value='달걀, 토마토, 대파';prepareStepTimer();});
+ const contained=async(label)=>{const issues=await p.evaluate(()=>{const bad=[];if(document.documentElement.scrollHeight>innerHeight+1||document.documentElement.scrollWidth>innerWidth+1)bad.push('document overflow');for(const e of document.querySelectorAll('.stage:not([hidden]) button,.stage:not([hidden]) input,.stage:not([hidden]) textarea,.stage:not([hidden]) .camera,.stage:not([hidden]) #bookContent,.stage:not([hidden]) #timerPanel,.stage:not([hidden]) .menu-description,.stage:not([hidden]) #evidence')){if(e.closest('[hidden]'))continue;const r=e.getBoundingClientRect();if(!r.width||!r.height)continue;if(r.bottom>innerHeight+1||r.right>innerWidth+1||r.left<0||r.top<0)bad.push(e.id||e.className);if(['bookContent','timerPanel','evidence'].includes(e.id)||e.className==='menu-description'){if(e.scrollHeight>e.clientHeight+2||e.scrollWidth>e.clientWidth+2)bad.push('content overflow '+(e.id||e.className));}}return bad;});assert.deepEqual(issues,[],label);};
+ const sizes=[[1920,1080],[1536,864],[1366,768],[1280,720],[1024,768],[800,600],[768,1024],[390,844],[375,667],[844,390]];
+ for(const [width,height] of sizes){await p.setViewportSize({width,height});for(let n=1;n<=4;n++){await p.evaluate(s=>showStage(s),n);await p.waitForTimeout(90);await contained(`${width}x${height} stage ${n}`);if(process.env.KITCHEN_SCREENSHOT_DIR&&[1366,390].includes(width))await p.screenshot({path:`${process.env.KITCHEN_SCREENSHOT_DIR}/${width}-stage${n}.png`});}
+ await p.evaluate(()=>{timer.set(86400);timerMode=true;renderMode();renderTimer();});await p.waitForTimeout(60);await contained(`${width}x${height} timer mode 24h`);
+ }
+ // Maximum-length recipe content is preserved across continuation pages after resizing.
+ await p.evaluate(()=>{recipe={title:'긴 제목 '.repeat(13).trim(),ingredients:Array.from({length:30},(_,i)=>`${i+1} 재료 `+'가나다라 '.repeat(20)),notes:Array.from({length:10},(_,i)=>`${i+1} 주의사항 `+'가나다라 '.repeat(20)),steps:[{title:'긴 조리 단계',instruction:'재료를 조심히 골고루 섞어주세요. '.repeat(40),timer_seconds:60}]};page=0;bookPart=0;showStage(4);});
+ for(const [width,height] of [[1366,768],[390,844],[844,390]]){await p.setViewportSize({width,height});await p.waitForTimeout(100);for(const step of [0,1]){await p.evaluate(n=>{page=n;bookPart=0;renderBook();},step);const data=await p.evaluate(()=>({all:bookParts.flat().map(x=>x.textContent).join(''),required:page===0?[recipe.title,...recipe.ingredients,...recipe.notes]:[recipe.steps[0].instruction],count:bookParts.length}));assert.ok(data.count>1);for(const text of data.required)assert.ok(data.all.includes(text),'pagination lost text');for(let i=0;i<data.count;i++){await p.evaluate(n=>{bookPart=n;paintBook();},i);await contained(`long content ${width} step ${step} part ${i}`);}}}
+ // Long recommendation and recognition paragraphs use the same lossless paginator.
+ await p.setViewportSize({width:390,height:844});await p.evaluate(()=>{evidenceTexts=['인식 설명 '.repeat(100)];showStage(2);});await p.waitForTimeout(100);assert.equal(await p.evaluate(()=>evidenceParts.flat().map(x=>x.textContent).join('')),await p.evaluate(()=>evidenceTexts.join('')));await contained('long evidence');
+ await p.evaluate(()=>{menus=menus.map(m=>({...m,reason:'추천 설명 '.repeat(50),missing:Array.from({length:20},(_,i)=>'재료'+i)}));renderMenus();showStage(3);});await p.waitForTimeout(100);await contained('long menus');
+ assert.deepEqual(errors,[]);console.log('PASS: 10 viewport sizes × 4 stages, timer mode + 24h display, no page/panel overflow; long recipe and evidence lossless pagination; long menus.');
+ }finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1)});

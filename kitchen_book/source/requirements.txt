@@ -1,6 +1,7 @@
--r requirements-workflow.txt
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+--only-binary=llama-cpp-python
+# Reference training environment: Python 3.12
 Pillow>=10.4,<13
 numpy>=1.26,<3
-# Retained from supplied source; real model runtime not installed/tested here.
 mediapipe==1.0.1
-# Install llama-cpp-python separately; do not replace a working GPU build implicitly.
+llama-cpp-python==0.3.34

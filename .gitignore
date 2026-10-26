@@ -6,4 +6,6 @@ venv/
 __pycache__/
 *.pyc
 models/
-*.zip*.pt
+*.gguf
+*.pt
+*.task

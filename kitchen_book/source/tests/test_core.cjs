@@ -17,10 +17,10 @@ test('gesture fires once, requires neutral hand release, and rejects low confide
  for(let n=0;n<=2000;n+=100){const r=gate.feed('Thumb_Up',.9,n);if(r.event)events.push(r.event);}
  assert.deepEqual(events,['Thumb_Up']);
  // Switching directly to a different recognized pose is deliberately not a release.
- assert.equal(gate.feed('Victory',.95,2100).event,null);
+ assert.equal(gate.feed('Open_Palm',.95,2100).event,null);
  gate.feed('None',0,2200);gate.feed('None',0,2600);
- for(let n=2700;n<=3700;n+=100){const r=gate.feed('Victory',.9,n);if(r.event)events.push(r.event);}
- assert.deepEqual(events,['Thumb_Up','Victory']);
+ for(let n=2700;n<=3700;n+=100){const r=gate.feed('Open_Palm',.9,n);if(r.event)events.push(r.event);}
+ assert.deepEqual(events,['Thumb_Up','Open_Palm']);
  gate.reset();for(let n=0;n<2000;n+=100)assert.equal(gate.feed('Thumb_Up',.4,n).event,null);
 });
 test('inference interruption cannot satisfy a hold',()=>{
@@ -40,18 +40,7 @@ test('legacy recipe duration fallback matches Python corpus',()=>{
 
 test('stable different pose works without lowering the hand; held pose never repeats',()=>{
  const gate=new GestureGate();let events=[];
- for(let n=0;n<2100;n+=100){const name=n<1000?'Thumb_Up':'Victory';const r=gate.feed(name,.99,n);if(r.event)events.push(r.event);}
- assert.deepEqual(events,['Thumb_Up','Victory']);
- for(let n=2100;n<4000;n+=100)assert.equal(gate.feed('Victory',.99,n).event,null);
-});
-const {TimerSequence}=require('../static/core.js');
-test('F305 held fingers commit only after hand release; timeout and interruptions cancel',()=>{
- const seq=new TimerSequence();seq.begin(0);
- for(const t of [0,200,400,600,800])seq.feed(true,3,t);
- assert.equal(seq.feed(false,0,1000).seconds,undefined);
- assert.equal(seq.feed(false,0,1400).seconds,180);
- assert.equal(seq.active,false);
- seq.begin(2000);assert.equal(seq.feed(true,2,7001).cancelled,true);
- seq.begin(8000);seq.feed(true,4,8000);seq.feed(true,4,9000);
- assert.equal(seq.feed(false,0,9200).seconds,undefined);assert.equal(seq.feed(false,0,9600).seconds,undefined);
+ for(let n=0;n<2100;n+=100){const name=n<1000?'Thumb_Up':'Open_Palm';const r=gate.feed(name,.99,n);if(r.event)events.push(r.event);}
+ assert.deepEqual(events,['Thumb_Up','Open_Palm']);
+ for(let n=2100;n<4000;n+=100)assert.equal(gate.feed('Open_Palm',.99,n).event,null);
 });

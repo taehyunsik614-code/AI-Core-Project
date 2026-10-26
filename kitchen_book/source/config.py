@@ -22,20 +22,3 @@ def model_path(kind):
 
 def model_status():
     return {k: {'file': v, 'exists': (MODELS / v).is_file()} for k, v in MODEL_FILES.items()}
-
-# Low-memory appliance defaults. Set before starting the server.
-IMAGE_SIDE = max(224, min(896, int(os.environ.get('KITCHEN_IMAGE_SIDE', '448'))))
-VERIFY_IMAGE = os.environ.get('KITCHEN_VERIFY_IMAGE', '0') == '1'
-AI_ATTEMPTS = max(1, min(2, int(os.environ.get('KITCHEN_AI_ATTEMPTS', '1'))))
-CONTEXT_SIZE = int(os.environ.get('KITCHEN_CONTEXT', '4096'))
-
-MODEL_FILES['yolo'] = os.environ.get('KITCHEN_YOLO', 'best.pt')
-DETECTOR = os.environ.get('KITCHEN_DETECTOR', 'auto').lower()
-if DETECTOR not in ('auto', 'yolo', 'vlm'): raise ValueError('KITCHEN_DETECTOR: auto/yolo/vlm')
-YOLO_SIZE = int(os.environ.get('KITCHEN_YOLO_SIZE', '640'))
-YOLO_CONF = float(os.environ.get('KITCHEN_YOLO_CONF', '.10'))
-YOLO_ACCEPT = float(os.environ.get('KITCHEN_YOLO_ACCEPT', '.30'))
-YOLO_IOU = float(os.environ.get('KITCHEN_YOLO_IOU', '.5'))
-YOLO_DEVICE = os.environ.get('KITCHEN_YOLO_DEVICE', 'cpu')
-if not 0 <= YOLO_CONF <= YOLO_ACCEPT <= 1: raise ValueError('YOLO thresholds must satisfy 0 <= conf <= accept <= 1')
-VERSION = '1.3.0'

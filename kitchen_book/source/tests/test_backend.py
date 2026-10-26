@@ -6,22 +6,15 @@ import sys
 import threading
 import time
 import unittest
-from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
-import config
 import schema
 from ai import decode_image, KitchenAI
-from app import Jobs, create_app
-from fastapi.testclient import TestClient
-
-_DETECTOR_PATCH = patch.object(config, 'DETECTOR', 'vlm')
-def setUpModule(): _DETECTOR_PATCH.start()
-def tearDownModule(): _DETECTOR_PATCH.stop()
+from app import Jobs, make_handler
 
 class SchemaTests(unittest.TestCase):
     def test_fenced_and_thinking_json(self):
@@ -100,7 +93,6 @@ class VisionFormatTests(unittest.TestCase):
         self.assertTrue(result['uncertain'])
 
 class AIAdapterTests(unittest.TestCase):
-    @patch.object(config, 'AI_ATTEMPTS', 2)
     def test_invalid_generation_is_retried_then_validated(self):
         class FakeModel:
             def __init__(self):
@@ -119,7 +111,6 @@ class AIAdapterTests(unittest.TestCase):
         self.assertEqual(content[0]['type'],'image_url')
         self.assertTrue(content[0]['image_url']['url'].startswith('data:image/jpeg;base64,'))
 
-    @patch.object(config, 'VERIFY_IMAGE', True)
     def test_same_photo_is_verified_and_rejected_candidate_is_removed(self):
         outputs=[{'objects':[{'name':'재료A','evidence':'둥근 표면'},{'name':'재료B','evidence':'잘 보이지 않음'}],'uncertain':[]},
                  {'checks':[{'name':'재료A','visible':True,'evidence':'특징 일치'},{'name':'재료B','visible':False,'evidence':'사진에서 확인 안 됨'}]}]
@@ -134,7 +125,7 @@ class AIAdapterTests(unittest.TestCase):
         self.assertEqual(result['ingredients'],['재료A'])
         self.assertIn('재료B',result['uncertain'][0])
         self.assertTrue(result['review_required'])
-        self.assertEqual(result['image_info']['width'],448)
+        self.assertEqual(result['image_info']['width'],896)
         images=[c['messages'][1]['content'][0]['image_url']['url'] for c in model.calls]
         self.assertEqual(images[0],images[1])
         self.assertTrue(all(c['temperature']==0 for c in model.calls))
@@ -154,7 +145,6 @@ class AIAdapterTests(unittest.TestCase):
         self.assertEqual(result['ingredients'],[])
         self.assertEqual(len(calls),1)
 
-    @patch.object(config, 'VERIFY_IMAGE', True)
     def test_failed_second_pass_keeps_explicitly_unverified_candidates(self):
         ai=KitchenAI();calls=[]
         def ask(kind,prompt,validator,image=None,**kwargs):
@@ -203,20 +193,25 @@ class JobTests(unittest.TestCase):
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.client=TestClient(create_app(demo=True))
-        cls.client.__enter__()
+        cls.server=ThreadingHTTPServer(('127.0.0.1',0),make_handler(demo=True))
+        cls.thread=threading.Thread(target=cls.server.serve_forever,daemon=True)
+        cls.thread.start()
+        cls.url=f'http://127.0.0.1:{cls.server.server_port}'
         cls.csrf=cls.call('/api/health')['csrf']
 
     @classmethod
     def tearDownClass(cls):
-        cls.client.__exit__(None,None,None)
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join()
 
     @classmethod
     def call(cls,path,payload=None,csrf=True):
-        headers={'X-Kitchen-Token':cls.csrf} if payload is not None and csrf else {}
-        response=cls.client.get(path) if payload is None else cls.client.post(path,json=payload,headers=headers)
-        if response.status_code>=400: raise HTTPError(path,response.status_code,response.text,{},None)
-        return response.json()
+        headers={'Content-Type':'application/json'}
+        if payload is not None and csrf:headers['X-Kitchen-Token']=cls.csrf
+        req=Request(cls.url+path, data=json.dumps(payload).encode() if payload is not None else None,headers=headers)
+        with urlopen(req,timeout=5) as response:
+            return json.load(response)
 
     def job(self,path,payload):
         job_id=self.call(path,payload)['job_id']
