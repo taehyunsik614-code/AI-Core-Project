@@ -44,6 +44,8 @@ const assert=require('node:assert/strict');
  assert.equal(await p.locator('#timerDialog').isVisible(),false);
  await p.locator('#startTimer').click();await p.locator('#next').click();assert.equal(await p.evaluate(()=>timer.running),true);
  await p.reload();await p.waitForFunction(()=>document.querySelector('#modeBadge').textContent.includes('DEMO'));
+ assert.equal(await p.locator('#stage1').isVisible(),true);
+ await p.locator('#resumeBook').click();
  assert.equal(await p.locator('#stage4').isVisible(),true);
  await p.waitForFunction(()=>document.querySelector('#timerState').textContent.includes('시간이 되었습니다'),null,{timeout:10000});
  const downloaded=p.waitForEvent('download');await p.locator('#exportBook').click();assert.equal((await downloaded).suggestedFilename(),'recipe-book.json');

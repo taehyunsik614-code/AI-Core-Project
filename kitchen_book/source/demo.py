@@ -2,7 +2,7 @@
 
 def result(kind, payload):
     if kind == 'ingredients':
-        return {'ingredients': ['달걀', '토마토', '대파'], 'uncertain': ['데모 고정 재료입니다. 실제 사진 인식이 아닙니다.']}
+        return {'ingredients': (['감자'] if payload.get('scan') == 'single' else ['달걀', '토마토', '대파']), 'uncertain': ['데모 고정 재료입니다. 실제 사진 인식이 아닙니다.']}
     if kind == 'menus':
         return {'menus': [
             {'id': '1', 'name': '토마토 달걀볶음', 'reason': '데모 예시: 부드러운 달걀과 토마토의 조합', 'missing': ['식용유', '소금']},

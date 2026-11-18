@@ -32,10 +32,14 @@ class GestureGate {
     if(this.last!==null && now-this.last>650){this.candidate=null;this.since=now;}
     this.last=now;
     if(!name || name==='None' || score<0.65){
-      this.candidate=null;
       if(this.neutralSince===null)this.neutralSince=now;
+      if(now-this.neutralSince>180)this.candidate=null;
       if(now-this.neutralSince>=this.release)this.latched=false;
       return {event:null,progress:0};
+    }
+    if(this.neutralSince!==null){
+      if(now-this.neutralSince>300)this.candidate=null;
+      else if(this.candidate)this.since+=now-this.neutralSince;
     }
     this.neutralSince=null;
     if(this.latched && name===this.firedPose)return {event:null,progress:1};

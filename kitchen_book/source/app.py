@@ -11,6 +11,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+import http.client
+import device
 import config
 from ai import KitchenAI
 from gestures import GestureEngine
@@ -55,7 +57,7 @@ class Jobs:
             return dict(self.records[job_id]) if job_id in self.records else None
 
 
-def make_handler(demo=False):
+def make_handler(demo=False, pi=None):
     jobs = Jobs(KitchenAI(demo))
     gesture = GestureEngine()
     token = secrets.token_urlsafe(32)
@@ -81,8 +83,14 @@ def make_handler(demo=False):
             if not self.valid_host():
                 return self.send(403, {'error': 'localhost에서 접속하세요.'})
             path = urlparse(self.path).path
+            if path == '/api/device/frame':
+                try:
+                    frame = device.relay(pi, '/frame.jpg')
+                except (OSError, http.client.HTTPException) as exc:
+                    return self.send(502, {'error': str(exc)})
+                return self.send(200, frame, 'image/jpeg')
             if path == '/api/health':
-                return self.send(200, {'version': '1.1.1', 'demo': demo, 'models': config.model_status(), 'csrf': token})
+                return self.send(200, {'version': '1.1.1', 'demo': demo, 'models': config.model_status(), 'csrf': token, 'device': pi})
             if path.startswith('/api/jobs/'):
                 record = jobs.get(path.rsplit('/', 1)[-1])
                 return self.send(200 if record else 404, record or {'error': '작업 없음'})
@@ -106,6 +114,15 @@ def make_handler(demo=False):
                 if not isinstance(payload, dict):
                     raise ValueError('JSON 객체가 필요합니다.')
                 path = urlparse(self.path).path
+                if path == '/api/device/state':
+                    value = device.state(payload)
+                    try:
+                        ack = json.loads(device.relay(pi, '/state', value))
+                        if 'stage' in value and (ack.get('stage'),ack.get('page')) != (value['stage'],value['page']):
+                            raise ConnectionError('Pi 단계 응답 불일치 · Pi 파일 업데이트 및 재시작 필요')
+                    except (OSError, http.client.HTTPException) as exc:
+                        return self.send(502, {'error': str(exc)})
+                    return self.send(200, ack)
                 if path == '/api/gesture':
                     return self.send(200, gesture.recognize(payload.get('image')))
                 kind = {'/api/ingredients': 'ingredients', '/api/menus': 'menus', '/api/recipe': 'recipe'}.get(path)
@@ -113,6 +130,8 @@ def make_handler(demo=False):
                     return self.send(404, {'error': '경로 없음'})
                 if kind == 'ingredients':
                     from ai import decode_image
+                    if payload.get('scan', 'classic') not in ('classic', 'multi', 'single', 'quick'):
+                        raise ValueError('촬영 모드 오류')
                     decode_image(payload.get('image'))
                 else:
                     payload['ingredients'] = schema.strings(payload.get('ingredients'), '확인 재료', 1, 30)
@@ -141,6 +160,7 @@ def main():
     parser.add_argument('--port', type=int, default=8000)
     parser.add_argument('--demo', action='store_true', help='LLM/VLM 없이 고정 예시로 UI 확인. 제스처는 실제 모델 필요.')
     parser.add_argument('--check', action='store_true', help='모델 파일과 패키지 설치 검사')
+    parser.add_argument('--device', type=device.device_ip, metavar='PI_IP')
     args = parser.parse_args()
     if args.check:
         modules = {m: importlib.util.find_spec(m) is not None for m in ['PIL', 'numpy', 'mediapipe', 'llama_cpp']}
@@ -148,7 +168,7 @@ def main():
         print(json.dumps(status, ensure_ascii=False, indent=2))
         raise SystemExit(0 if all(modules.values()) and all(x['exists'] for x in status['models'].values()) else 1)
     logging.basicConfig(level=logging.INFO)
-    server = ThreadingHTTPServer(('127.0.0.1', args.port), make_handler(args.demo))
+    server = ThreadingHTTPServer(('127.0.0.1', args.port), make_handler(args.demo, args.device))
     server.daemon_threads = True
     print(f'비접촉 AI 레시피북: http://127.0.0.1:{args.port}  |  ' + ('DEMO 예시 모드' if args.demo else '로컬 AI 모드'), flush=True)
     try:

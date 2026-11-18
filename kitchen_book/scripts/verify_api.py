@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""A1-A5, R1-R5 verifier. Demo != real model or physical camera validation.
-Run server first. Uses stdlib HTTP; direct rule tests import source/workflow.py.
+"""Kitchen recipe API verifier.
+Run server first. Uses stdlib HTTP.
 """
 import argparse, base64, json, sys, time
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'source'))
-from workflow import parse_tool_call, apply_rules, validate_request
+
 
 
 def main():
@@ -19,6 +19,8 @@ def main():
     parser.add_argument('--output',type=Path,default=Path('api_validation.json'))
     parser.add_argument('--timeout',type=float,default=600)
     parser.add_argument('--require-all',action='store_true',help='SKIP도 비정상 종료(2)')
+    parser.add_argument('--quick',action='store_true',help='모델 추론 생략')
+    parser.add_argument('--device',metavar='IP',help='실제 Pi 영상 및 출력 시험')
     args=parser.parse_args(); results=[];token='';latencies={}
     def http(path,data=None,token_override=None):
         headers={'Content-Type':'application/json','X-Kitchen-Token':token if token_override is None else token_override}
@@ -46,15 +48,13 @@ def main():
     status,health=http('/api/health');require(status==200,'서버 health 오류');token=health['csrf']
     check('A1.mode',lambda:require(health['demo']==(args.mode=='demo'),'--mode와 서버 --demo 설정 불일치'))
     check('A1.screen',lambda:require('stage4' in http('/')[1],'4단계 화면 없음'))
-    check('A1.schema',lambda:require('/api/llm-answer' in http('/openapi.json')[1]['paths'],'OpenAPI 없음'))
     check('A3.invalid_image',lambda:require(http('/api/ingredients',{'image':'bad'})[0]==400,'400 필요'))
     check('A4.empty_ingredients',lambda:require(http('/api/menus',{'ingredients':[]})[0]==400,'400 필요'))
-    check('A5.empty_prompt',lambda:require(http('/api/llm-answer',{'prompt':''})[0]==400,'400 필요'))
     check('A1.token',lambda:require(http('/api/menus',{'ingredients':['달걀']},'wrong')[0]==403,'403 필요'))
     fixture=Path(__file__).resolve().parents[1]/'source/tests/camera_fixture.jpg'
     image_path=args.image or (fixture if args.mode=='demo' else None)
     image='data:image/jpeg;base64,'+base64.b64encode(image_path.read_bytes()).decode() if image_path else None
-    if image:
+    if image and not args.quick:
         check('A3.capture',lambda:require(isinstance(job('/api/ingredients',{'image':image})['ingredients'],list),'ingredients 목록 없음'))
     else:
         results.append({'id':'A3.capture','status':'SKIP','detail':'--image 실제 사진 필요'})
@@ -70,33 +70,20 @@ def main():
         menus=job('/api/menus',{'ingredients':items})['menus'];require(len(menus)==3,'3개 추천 필요')
         recipe=job('/api/recipe',{'ingredients':items,'menu':menus[0]});require(len(recipe['steps'])>0,'단계 없음')
         return '사용자 확인 재료 → 메뉴 → 레시피 JSON'
-    check('A4.generate',generation)
-    context={'page':1,'total_pages':5,'timer_seconds':180,'step_seconds':120}
-    def intent(text,**extra):
-        result=job('/api/llm-answer',{'prompt':text,'context':context,**extra})
-        require(result['need_more_info']==(result['tool']=='ask'),'R4 불일치')
-        require(result['inference_mode']==('demo_rules' if args.mode=='demo' else 'qwen'),'추론 모드 불일치')
-        return result
-    examples=[('다음 2페이지','page',{'direction':'next','steps':2}),('이전 페이지','page',{'direction':'previous','steps':1}),
-              ('타이머 3분 설정','timer',{'action':'set','seconds':180}),('타이머 시작','timer',{'action':'start'}),
-              ('타이머 일시정지','timer',{'action':'pause'}),('타이머 초기화','timer',{'action':'reset'}),
-              ('타이머 설정','ask',None),('현재 단계 설명해 줘','describe',None)]
-    for i,(prompt,tool,expected) in enumerate(examples,1):
-        def case(p=prompt,t=tool,e=expected):
-            result=intent(p);require(result['tool']==t,str(result));require(e is None or result['args']==e,str(result));return p
-        check(f'A5.intent{i}',case)
-    def continuation():
-        first=intent('2페이지 넘겨');require(first['tool']=='ask',str(first))
-        history=[{'role':'user','content':'2페이지 넘겨'},{'role':'assistant',**first}]
-        result=intent('이전',history=history);require(result['args']=={'direction':'previous','steps':2},str(result))
-    check('R5.continuation',continuation)
-    hand={'name':'Thumb_Down','mode':'book','stable':True,'score':.99,'age_ms':100}
-    check('F306.conflict',lambda:require(intent('다음 2페이지',gesture=hand)['args']['direction']=='next','텍스트 우선 실패'))
-    check('F306.hand',lambda:require(intent('이쪽으로 2페이지',gesture=hand)['args']['direction']=='previous','손 근거 실패'))
-    check('F306.stale',lambda:require(intent('이쪽으로 2페이지',gesture={**hand,'age_ms':2000})['tool']=='ask','오래된 손 근거 사용'))
-    check('R1.parser',lambda:require(parse_tool_call('{broken')['tool']=='describe','잘못된 JSON fallback 실패'))
-    check('R2.clamp',lambda:require(parse_tool_call({'tool':'page','args':{'direction':'next','steps':999}})['args']['steps']==10,'clamp 실패'))
-    check('R3.evidence',lambda:require(apply_rules(parse_tool_call({'tool':'page','args':{'direction':'next'}}),validate_request({'prompt':'버스 위치로 가','context':context}))['tool']=='ask','근거 없는 이동'))
+    if not args.quick: check('A4.generate',generation)
+    check('Pi.invalid',lambda:require(http('/api/device/state',{'mode':'bad'})[0]==400,'400 필요'))
+    if not health.get('device'):
+        check('Pi.unconfigured',lambda:require(http('/api/device/frame')[0]==502,'502 필요'))
+    if args.device:
+        require(args.device==health.get('device'),'서버와 검증에 같은 --device IP를 사용하세요')
+        def frame():
+            with urlopen(args.url+'/api/device/frame',timeout=8) as response:
+                raw=response.read()
+                require(raw.startswith(bytes.fromhex('ffd8')) and raw.endswith(bytes.fromhex('ffd9')),'JPEG 오류')
+        check('Pi.frame',frame)
+        for mode in ('step','running','finished','idle'):
+            check('Pi.'+mode,lambda m=mode:require(http('/api/device/state',dict(page=1,total=3,seconds=5,mode=m))[0]==200,'Pi 출력 오류'))
+            time.sleep(1)
     for result in results:
         if result['status']=='SKIP':print('SKIP',result['id'],result['detail'])
     summary={key:sum(x['status']==key for x in results) for key in ('PASS','FAIL','SKIP')}

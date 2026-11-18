@@ -18,3 +18,14 @@ def checks(names):
             'visible': {'type': 'boolean'}, 'evidence': {'type': 'string'}},
             'required': ['name', 'visible', 'evidence'], 'additionalProperties': False}}},
         'required': ['checks'], 'additionalProperties': False}
+
+def string_list(limit):
+    return {'type':'array','maxItems':limit,'items':{'type':'string'}}
+
+def record(fields):
+    return {'type':'object','properties':fields,'required':list(fields),'additionalProperties':False}
+
+QUICK_NAMES = record({'names':string_list(12)})
+SHORT_STEP = record({'title':{'type':'string'}, 'instruction':{'type':'string'}})
+SHORT_RECIPE = record({'ingredients':string_list(30),
+                       'steps':{'type':'array','minItems':3,'maxItems':6,'items':SHORT_STEP}})
