@@ -8,6 +8,7 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--dom',action='store_true');a=parser.parse_args()
     commands=[[sys.executable,'-m','unittest','discover','-s',str(ROOT/'source/tests'),'-p','test*.py'],['node',str(ROOT/'source/tests/test_core.cjs')]]
     commands.append(['node',str(ROOT/'source/tests/test_correction.cjs')])
+    commands.append(['node',str(ROOT/'source/tests/test_voice.cjs')])
     for cmd in commands:
         code=subprocess.call(cmd)
         if code:return code

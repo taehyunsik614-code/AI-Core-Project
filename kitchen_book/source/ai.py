@@ -106,30 +106,45 @@ class KitchenAI:
                         {'type': 'text', 'text': retry}]}
         raise schema.OutputError(f'모델 출력 검증 실패 (2회): {last_error}')
 
+    def translate_texts(self, texts):
+        foreign = list(dict.fromkeys(s for s in texts if re.search('[A-Za-z]', s) or
+                                     (any(c.isalpha() for c in s) and not re.search('[가-힣]', s))))
+        if not foreign:
+            return {}
+        shape = output_formats.record({str(i): {'type': 'string'} for i in range(len(foreign))})
+        def validate(data):
+            result = {}
+            for i, original in enumerate(foreign):
+                value = schema.string(data.get(str(i)), '한국어 번역', 1000)
+                if re.search('[A-Za-z]', value) or not re.search('[가-힣]', value):
+                    raise schema.OutputError('모든 영어 표현과 단위를 한국어로 번역하세요.')
+                result[original] = value
+            return result
+        return self._ask('llm', '다음은 레시피 화면에 표시할 문구다. 각 항목 전체를 자연스러운 한국어로 번역하라. '
+                         '혼합 문장은 문맥에 맞게 다시 쓰고 수량, 시간, 온도, 재료와 조리 순서를 보존하라. '
+                         '영문 단위도 한글로 풀어 쓰고 같은 번호를 키로 반환하라. ' +
+                         json.dumps(dict(enumerate(foreign)), ensure_ascii=False), validate, response_schema=shape)
+
+    def korean_book(self, book):
+        texts = [book['title'], *book['ingredients'], *book['notes']]
+        for step in book['steps']:
+            texts.extend((step['title'], step['instruction']))
+        translated = self.translate_texts(texts)
+        if not translated:
+            return book
+        def ko(text):
+            return translated.get(text, text)
+        return schema.recipe(dict(title=ko(book['title']), ingredients=list(map(ko, book['ingredients'])),
+                                  notes=list(map(ko, book['notes'])), steps=[
+            dict(step, title=ko(step['title']), instruction=ko(step['instruction'])) for step in book['steps']]))
+
     def korean_review(self, accepted, unsure):
-        # Translate remaining foreign names and evidence together after visual inference.
         texts = [s for x in accepted for s in (x['name'], x['evidence'])] + unsure
-        foreign = list(dict.fromkeys(s for s in texts if re.search('[a-zA-Z]', s)
-                                     or not re.search('[가-힣]', s)))
-        translations = {}
-        if foreign:
-            shape = {'type':'object', 'properties':{str(i):{'type':'string'} for i in range(len(foreign))},
-                     'required':[str(i) for i in range(len(foreign))], 'additionalProperties':False}
-            def validate(data):
-                result = {}
-                for i, original in enumerate(foreign):
-                    value = schema.string(data.get(str(i)), '한국어 번역', 300)
-                    if re.search('[a-zA-Z]', value) or not re.search('[가-힣]', value):
-                        raise schema.OutputError('모든 표현을 한글로 번역하세요.')
-                    result[original] = value
-                return result
-            try:
-                translations = self._ask('llm', '각 번호의 재료명 또는 시각 설명을 의미 그대로 자연스러운 한국어로 번역하라. '
-                    '재료를 추론하거나 추가하지 마라. 같은 번호를 키로 JSON 객체를 출력하라. ' +
-                    json.dumps(dict(enumerate(foreign)), ensure_ascii=False), validate, response_schema=shape)
-            except schema.OutputError:
-                translations = dict.fromkeys(foreign, '')
-                unsure.append('한국어로 확인되지 않은 표현이 있습니다. 사진을 확인하세요.')
+        try:
+            translations = self.translate_texts(texts)
+        except schema.OutputError:
+            translations = {s: '' for s in texts if re.search('[A-Za-z]', s) or not re.search('[가-힣]', s)}
+            unsure.append('한국어로 확인되지 않은 표현이 있습니다. 사진을 확인하세요.')
         items = {}
         for item in accepted:
             name = translations.get(item['name'], item['name']).strip()
@@ -226,6 +241,8 @@ class KitchenAI:
                 'verification_status': mode, 'image_info': {'width': image.width, 'height': image.height}}
 
     def run(self, kind, payload):
+        if kind == "translate-book":
+            return self.korean_book(payload["book"])
         if self.demo:
             from demo import result
             return result(kind, payload)
@@ -271,11 +288,17 @@ class KitchenAI:
         items = schema.strings(payload.get('ingredients'), '확인 재료', 1, 30)
         context = json.dumps({'확인된재료': items, '요청': payload.get('request', '')}, ensure_ascii=False)
         if kind == 'menus':
-            return self._ask('llm',
+            result = self._ask('llm',
                 '확인된 재료 중심으로 서로 다른 요리 3개를 추천하라. 필요한 추가 재료는 missing에 반드시 표시하라. '
                 '사용자 요청(알레르기, 인분, 시간 등)이 있으면 준수하라. '
                 '형식: {"menus":[{"name":"메뉴명","reason":"추천 이유","missing":["추가 재료"]}, ...]}\n데이터: ' + context,
                 schema.menus)
+            texts = [s for m in result['menus'] for s in [m['name'], m['reason'], *m['missing']]]
+            translated = self.translate_texts(texts)
+            def ko(s):
+                return translated.get(s, s)
+            return schema.menus({'menus': [dict(m, name=ko(m['name']), reason=ko(m['reason']),
+                                        missing=list(map(ko, m['missing']))) for m in result['menus']]})
         menu = payload['menu']
         cache_key = (context, menu['name'], tuple(menu.get('missing', [])))
         if cache_key in self.recipe_cache:
@@ -289,9 +312,10 @@ class KitchenAI:
                                       notes=['추가 준비: ' + ', '.join(missing)] if missing else []))
         book = self._ask('llm', '선택 메뉴를 조리할 수 있도록 한국어로 작성한다. 요청을 지키고 기본 분량은 1~2인분. '
                          'ingredients는 분량을 포함하고 steps는 필요한 순서대로 3~6개. 각 단계는 짧은 제목과 '
-                         '한 문장으로, 필요한 조리 시간과 익힘 확인 방법을 포함한다. '
+                         '재료와 구체적인 행동을 담은 한국어 한 문장으로 쓴다. 같은 구절을 반복하지 않는다. 필요한 단계에만 시간이나 익힘 확인 방법을 적는다. '
                          '데이터: ' + context + ' 선택 메뉴: ' + json.dumps(menu,ensure_ascii=False),
                          complete, response_schema=output_formats.SHORT_RECIPE, token_limit=800)
+        book = self.korean_book(book)
         if len(self.recipe_cache) >= 20:
             self.recipe_cache.pop(next(iter(self.recipe_cache)))
         self.recipe_cache[cache_key] = book

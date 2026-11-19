@@ -26,16 +26,20 @@ def state(data):
         value['bitmap'] = encoded
     return value
 
-def relay(ip, path, payload=None):
+def relay(ip, path, payload=None, timeout=4):
     if not ip:
         raise ConnectionError('Pi 주소를 --device 옵션으로 지정하세요.')
-    conn = http.client.HTTPConnection(ip, 8080, timeout=4)
+    conn = http.client.HTTPConnection(ip, 8080, timeout=timeout)
     try:
         body = None if payload is None else json.dumps(payload).encode()
         conn.request('GET' if body is None else 'POST', path, body, {'Content-Type':'application/json'})
         response = conn.getresponse()
         if response.status != 200:
-            raise ConnectionError('Pi 장치 응답 오류')
+            try:
+                message = json.loads(response.read(4096)).get('error')
+            except (ValueError, AttributeError):
+                message = None
+            raise ConnectionError(message or 'Pi 장치 응답 오류')
         raw = response.read(3_000_001)
         if len(raw) > 3_000_000:
             raise ConnectionError('Pi 응답 크기 초과')

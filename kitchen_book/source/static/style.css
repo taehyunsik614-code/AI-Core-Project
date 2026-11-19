@@ -20,3 +20,9 @@
 @media(max-height:500px) and (min-width:701px){.pose-name{font-size:8px}}
 
 .capture-controls,.review-form{overflow-y:auto}.correction select{min-width:0;flex:1}.correction button{white-space:nowrap}#piStatus{font-size:.75rem}.capture-controls{justify-content:flex-start}
+
+main:has(#piVoice:not([hidden])){grid-template-rows:auto auto auto minmax(0,1fr)}
+#piVoice:not([hidden]){display:flex;align-items:center;flex-wrap:wrap;gap:.4rem 1rem}
+#piVoice form{margin:0}
+#piVoice input{width:clamp(12rem,24vw,26rem)}
+#piVoiceStatus{font-size:.9rem;overflow-wrap:anywhere}

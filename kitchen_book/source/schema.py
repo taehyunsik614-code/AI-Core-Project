@@ -52,6 +52,26 @@ def menus(data):
                        'missing': strings(item.get('missing', []), '추가 재료', 0, 20)})
     return {'menus': result}
 
+def repetitive_instruction(text):
+    words = re.findall(r'[가-힣A-Za-z0-9]+', text)
+    # Catch both consecutive loops and a repeated clause after changing ingredient names.
+    for width in range(1, min(8, len(words) // 3) + 1):
+        phrases = [tuple(words[i:i + width]) for i in range(len(words) - width + 1)]
+        if any(phrases[i] == phrases[i + width] == phrases[i + 2 * width]
+               for i in range(len(phrases) - 2 * width)):
+            return True
+        if width == 2:
+            counts = {}
+            last_end = {}
+            for index, phrase in enumerate(phrases):
+                if index >= last_end.get(phrase, 0):
+                    last_end[phrase] = index + width
+                    counts[phrase] = counts.get(phrase, 0) + 1
+                    if counts[phrase] >= 4:
+                        return True
+    return False
+
+
 def recipe(data):
     title = string(data.get('title'), '레시피명', 80)
     items = strings(data.get('ingredients'), '재료와 분량', 1, 30)
@@ -63,6 +83,8 @@ def recipe(data):
         if not isinstance(item, dict):
             raise OutputError('조리 단계 형식 오류')
         instruction = string(item.get('instruction'), '조리 설명', 1000)
+        if repetitive_instruction(instruction):
+            raise OutputError(f'{len(clean)+1}단계 설명에 같은 말이 반복됩니다. 재료와 동작을 분명히 하여 자연스러운 한국어 한 문장으로 다시 작성하세요.')
         seconds = item.get('timer_seconds', 0)
         # Numeric strings are common structured-output slips. Reject all other types.
         if isinstance(seconds, str) and seconds.strip().isdigit():

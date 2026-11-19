@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 import http.client
 import device
+import kitchen_commands
 import config
 from ai import KitchenAI
 from gestures import GestureEngine
@@ -83,6 +84,11 @@ def make_handler(demo=False, pi=None):
             if not self.valid_host():
                 return self.send(403, {'error': 'localhost에서 접속하세요.'})
             path = urlparse(self.path).path
+            if path == '/api/voice-poll':
+                try:
+                    return self.send(200,json.loads(device.relay(pi,'/voice-text')))
+                except (ValueError,OSError,http.client.HTTPException) as exc:
+                    return self.send(502,{'error':str(exc)})
             if path == '/api/device/frame':
                 try:
                     frame = device.relay(pi, '/frame.jpg')
@@ -114,6 +120,16 @@ def make_handler(demo=False, pi=None):
                 if not isinstance(payload, dict):
                     raise ValueError('JSON 객체가 필요합니다.')
                 path = urlparse(self.path).path
+                if path == '/api/device/command':
+                    if payload.get('source') not in ('voice','device'):
+                        raise ValueError('명령 출처 오류')
+                    context = kitchen_commands.build_context(payload)
+                    data = {'user_content':json.dumps(context,ensure_ascii=False),'history':payload.get('history',[])}
+                    try:
+                        answer = json.loads(device.relay(pi,'/llm-infer',data,timeout=180))
+                    except (OSError,http.client.HTTPException) as exc:
+                        return self.send(502,{'error':str(exc)})
+                    return self.send(200,kitchen_commands.decide(context,answer))
                 if path == '/api/device/state':
                     value = device.state(payload)
                     try:
@@ -123,6 +139,11 @@ def make_handler(demo=False, pi=None):
                     except (OSError, http.client.HTTPException) as exc:
                         return self.send(502, {'error': str(exc)})
                     return self.send(200, ack)
+                if path == '/api/translate-book':
+                    book = payload.get('book')
+                    if not isinstance(book, dict):
+                        raise ValueError('레시피 형식 오류')
+                    return self.send(202, {'job_id': jobs.submit('translate-book', {'book': schema.recipe(book)})})
                 if path == '/api/gesture':
                     return self.send(200, gesture.recognize(payload.get('image')))
                 kind = {'/api/ingredients': 'ingredients', '/api/menus': 'menus', '/api/recipe': 'recipe'}.get(path)

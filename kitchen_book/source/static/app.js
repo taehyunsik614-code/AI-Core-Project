@@ -24,7 +24,7 @@ async function piStream(epoch){
  const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
  async function frame(){
    const res=await fetch('/api/device/frame',{cache:'no-store',signal:AbortSignal.timeout(6000)});
-   if(!res.ok)throw Error('Pi 카메라에 연결할 수 없습니다.');
+   if(!res.ok)throw Error('기기 카메라에 연결할 수 없습니다.');
    const bmp=await createImageBitmap(await res.blob());
    try{
      if(epoch!==cameraEpoch)return;
@@ -38,7 +38,7 @@ async function piStream(epoch){
  async function poll(){
    if(epoch!==cameraEpoch)return;
    try{await frame();if(epoch===cameraEpoch)setTimeout(poll,80);}
-   catch(e){if(epoch===cameraEpoch){stopCamera();notice('Pi 영상이 끊겼습니다. 카메라를 다시 켜 주세요.',true);}}
+   catch(e){if(epoch===cameraEpoch){stopCamera();notice('기기 영상이 끊겼습니다. 카메라를 다시 켜 주세요.',true);}}
  }
  setTimeout(poll,80);
  return media;
@@ -72,8 +72,8 @@ async function syncDevice(){
  const key=JSON.stringify([stage,title,state]);
  if(key===lastDeviceState&&deviceReady&&Date.now()-lastSyncTime<10000)return;
  sendingState=true;
- try{if(cooking)state.bitmap=oledBitmap(stage,title,state.page,state.total,mode,state.seconds);const ack=await request('/api/device/state',state);if(ack.stage!==state.stage||ack.page!==state.page)throw Error('PC·Pi 서버를 업데이트하고 재시작하세요.');lastDeviceState=key;lastSyncTime=Date.now();deviceReady=true;$('piStatus').textContent='Pi 출력 연결됨';}
- catch(e){deviceReady=false;$('piStatus').textContent='OLED 출력 실패 · '+e.message;}
+ try{if(cooking)state.bitmap=oledBitmap(stage,title,state.page,state.total,mode,state.seconds);const ack=await request('/api/device/state',state);if(ack.stage!==state.stage||ack.page!==state.page)throw Error('컴퓨터와 기기 서버를 업데이트하고 재시작하세요.');lastDeviceState=key;lastSyncTime=Date.now();deviceReady=true;$('piStatus').textContent='기기 출력 연결됨';}
+ catch(e){deviceReady=false;$('piStatus').textContent='표시 장치 연결 실패 · '+e.message;}
  finally{sendingState=false;}
 }
 
@@ -87,7 +87,13 @@ function validRecipe(x){
  if(!x || typeof x.title!=='string' || x.title.length>80 || !x.title.trim() || !Array.isArray(x.ingredients) || !x.ingredients.length || x.ingredients.length>30 || !Array.isArray(x.steps) || !x.steps.length || x.steps.length>16 || !Array.isArray(x.notes) || x.notes.length>10)return false;
  return x.ingredients.concat(x.notes).every(s=>typeof s==='string'&&s.length<=200) && x.steps.every(s=>s && typeof s.title==='string'&&s.title.length<=80 && typeof s.instruction==='string'&&s.instruction.length<=1000 && Number.isInteger(s.timer_seconds)&&s.timer_seconds>=0&&s.timer_seconds<=86400);
 }
-function restore(){try{const data=JSON.parse(localStorage.getItem(STORE)||'null');if(!data)return;data.recipe=normalizeRecipe(data.recipe);if(validRecipe(data.recipe)){recipe=data.recipe;page=Math.max(0,Math.min(recipe.steps.length,Number.isInteger(data.page)?data.page:0));}timer=new Timer(data.timer||{});timerPageKey=typeof data.timerPageKey==='string'?data.timerPageKey:'';timerSource=typeof data.timerSource==='string'?data.timerSource:'복원된 타이머';$('ingredients').value=typeof data.ingredients==='string'?data.ingredients:'';$('request').value=typeof data.request==='string'?data.request:'';}catch(e){notice('저장된 상태를 복원하지 못했습니다.',true);}}
+async function koreanBook(book){
+ const texts=[book.title,...book.ingredients,...book.notes,...book.steps.flatMap(s=>[s.title,s.instruction])];
+ if(!texts.some(s=>/[A-Za-z]/.test(s)))return book;
+ notice('저장된 레시피의 영어 표현을 한국어로 옮기고 있습니다.');
+ return normalizeRecipe(await aiJob('translate-book',{book}));
+}
+async function restore(){try{const data=JSON.parse(localStorage.getItem(STORE)||'null');if(!data)return;data.recipe=normalizeRecipe(data.recipe);if(validRecipe(data.recipe)){recipe=await koreanBook(data.recipe);page=Math.max(0,Math.min(recipe.steps.length,Number.isInteger(data.page)?data.page:0));}timer=new Timer(data.timer||{});timerPageKey=typeof data.timerPageKey==='string'?data.timerPageKey:'';timerSource=typeof data.timerSource==='string'?data.timerSource:'복원된 타이머';$('ingredients').value=typeof data.ingredients==='string'?data.ingredients:'';$('request').value=typeof data.request==='string'?data.request:'';}catch(e){throw Error('저장된 요리를 열 수 없습니다. '+e.message);}}
 async function request(path,data){
  const options=data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Kitchen-Token':token},body:JSON.stringify(data)};
  const response=await fetch(path,options);const result=await response.json();if(!response.ok)throw Error(result.error||'서버 요청 실패');return result;
@@ -104,7 +110,7 @@ async function aiJob(kind,payload){
      const job=await request('/api/jobs/'+job_id);
      if(job.status==='done')return job.result;
      if(job.status==='error')throw Error(job.error);
-     notice(`로컬 AI가 ${kind==='ingredients'?'재료를 확인':kind==='menus'?'메뉴를 추천':'레시피북을 작성'}하고 있습니다. ${Math.floor((Date.now()-started)/1000)}초 경과 · CPU에서는 수 분 걸릴 수 있습니다.`);
+     notice(`인공지능이 ${kind==='ingredients'?'재료를 확인':kind==='menus'?'메뉴를 추천':kind==='translate-book'?'한국어로 번역':'레시피북을 작성'}하고 있습니다. ${Math.floor((Date.now()-started)/1000)}초 경과 · 컴퓨터 성능에 따라 수 분 걸릴 수 있습니다.`);
    }
  }finally{setBusy(false);}
 }
@@ -120,7 +126,7 @@ async function startCamera(){try{
  if(stream)return;
  const epoch=++cameraEpoch;
  $('cameraStart').disabled=true;
- if($('cameraSource').value!=='pi'&&!navigator.mediaDevices?.getUserMedia)throw Error('localhost의 Chrome/Edge에서 실행하세요.');
+ if($('cameraSource').value!=='pi'&&!navigator.mediaDevices?.getUserMedia)throw Error('이 컴퓨터의 크롬이나 엣지에서 실행하세요.');
  const media=$('cameraSource').value==='pi'?await piStream(epoch):await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720}},audio:false});
  if(epoch!==cameraEpoch){media?.getTracks().forEach(t=>t.stop());return;}stream=media;
  $('video').srcObject=stream;$('gestureVideo').srcObject=stream;await Promise.all([$('video').play(),$('gestureVideo').play()]);$('gestureCameraHint').hidden=true;$('cameraHint').hidden=true;$('cameraStart').disabled=true;$('cameraStop').disabled=false;setBusy(busy);notice('재료를 카메라에 보여 주고 촬영하세요.');
@@ -151,11 +157,11 @@ async function capture(){try{
  evidenceTexts.push(...result.uncertain.map(x=>'확인 필요 · '+x));
  if(target&&result.ingredients.length!==1)evidenceTexts.unshift('한 가지로 식별하지 못해 기존 목록을 유지했습니다. 한 재료만 가까이 찍거나 이름을 입력하세요.');
  $('uncertain').textContent='';renderEvidence();
- $('photoInfo').textContent=demo?'DEMO · 고정 예시':target?result.ingredients.length===1?'근접 촬영 · 재료 목록을 갱신했습니다.':'근접 촬영 · 식별이 어려워 목록을 유지했습니다.':(scan==='quick'?'빠른 확인 · 재료 후보 ':'정밀 확인 · 재료 후보 ')+items.length+'개';
- save();notice(demo?'DEMO: 고정 예시입니다. 실제 사진 인식은 일반 모드에서 실행하세요.':result.verification_status==='unverified'?'재확인을 완료하지 못했습니다. 표시된 재료는 미검증 후보입니다. 사진과 직접 비교하여 수정한 뒤 확인란을 체크하세요.':'인식은 확정 결과가 아닙니다. 사진과 비교하여 재료를 수정하고 확인란을 체크하세요.');
+ $('photoInfo').textContent=demo?'시연 · 고정 예시':target?result.ingredients.length===1?'근접 촬영 · 재료 목록을 갱신했습니다.':'근접 촬영 · 식별이 어려워 목록을 유지했습니다.':(scan==='quick'?'빠른 확인 · 재료 후보 ':'정밀 확인 · 재료 후보 ')+items.length+'개';
+ save();notice(demo?'시연: 고정 예시입니다. 실제 사진 인식은 일반 모드에서 실행하세요.':result.verification_status==='unverified'?'재확인을 완료하지 못했습니다. 표시된 재료는 미검증 후보입니다. 사진과 직접 비교하여 수정한 뒤 확인란을 체크하세요.':'인식은 확정 결과가 아닙니다. 사진과 비교하여 재료를 수정하고 확인란을 체크하세요.');
 }catch(e){$('photoInfo').textContent='사진은 촬영됐지만 분석을 완료하지 못했습니다. 위 오류 내용을 확인하세요.';notice(e.message,true);}}
 async function recommend(){try{
- if(!reviewed)throw Error('재료 목록을 확인하고 확인란을 체크해 주세요.');const items=getIngredients();notice('메뉴 추천을 시작합니다.');const result=await aiJob('menus',{ingredients:items,request:$('request').value});menus=result.menus;renderMenus();showStage(3);save();notice('메뉴를 선택하면 LLM이 해당 메뉴의 레시피북을 만듭니다.');
+ if(!reviewed)throw Error('재료 목록을 확인하고 확인란을 체크해 주세요.');const items=getIngredients();notice('메뉴 추천을 시작합니다.');const result=await aiJob('menus',{ingredients:items,request:$('request').value});menus=result.menus;renderMenus();showStage(3);save();notice('메뉴를 선택하면 인공지능이 해당 메뉴의 레시피북을 만듭니다.');
 }catch(e){notice(e.message,true);}}
 function renderMenus(){
  const container=$('menus');container.replaceChildren();menus.forEach(menu=>{
@@ -206,7 +212,7 @@ function renderBook(){
  if(stage!==4)return;
  const blocks=[];
  if(page===0){
-  blocks.push(element('p','RECIPE / 준비하기','eyebrow'),element('h2',recipe.title,'recipe-title'),element('p','재료와 분량을 확인한 후 다음 페이지로 넘겨 주세요.','small'));
+  blocks.push(element('p','요리 준비','eyebrow'),element('h2',recipe.title,'recipe-title'),element('p','재료와 분량을 확인한 후 다음 페이지로 넘겨 주세요.','small'));
   recipe.ingredients.forEach(item=>blocks.push(element('p','• '+item,'recipe-item')));
   recipe.notes.forEach(note=>blocks.push(element('p',note,'recipe-note')));
  }else{
@@ -335,7 +341,7 @@ function configureVoice(){
  $('voice').onclick=()=>{try{recognition.start();$('voice').textContent='듣는 중…';notice('“메뉴 추천해줘”라고 말해 주세요. 브라우저 음성 서비스가 사용됩니다.');}catch(e){notice(e.message,true);}};
 }
 function exportBook(){if(!recipe)return;const blob=new Blob([JSON.stringify(recipe,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='recipe-book.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-async function importBook(event){try{const file=event.target.files[0];if(!file)return;if(file.size>100000)throw Error('레시피 파일은 100KB 이하여야 합니다.');const data=normalizeRecipe(JSON.parse(await file.text()));if(!validRecipe(data))throw Error('올바른 레시피 JSON 파일이 아닙니다.');recipe=normalizeRecipe(data);page=1;bookPart=0;timerMode=false;if(!timer.running){timer.set(0);timerPageKey='';timerSource='설정 대기';}prepareStepTimer();showStage(4);renderBook();renderMode();save();notice('저장한 레시피북을 불러왔습니다.');}catch(e){notice(e.message,true);}finally{event.target.value='';}}
+async function importBook(event){try{const file=event.target.files[0];if(!file)return;if(file.size>100000)throw Error('레시피 파일은 100킬로바이트 이하여야 합니다.');const data=normalizeRecipe(JSON.parse(await file.text()));if(!validRecipe(data))throw Error('올바른 레시피 저장 파일이 아닙니다.');recipe=await koreanBook(data);page=1;bookPart=0;timerMode=false;if(!timer.running){timer.set(0);timerPageKey='';timerSource='설정 대기';}prepareStepTimer();showStage(4);renderBook();renderMode();save();notice('저장한 레시피북을 불러왔습니다.');}catch(e){notice(e.message,true);}finally{event.target.value='';}}
 document.querySelectorAll('[data-stage]').forEach(b=>b.onclick=()=>showStage(Number(b.dataset.stage)));
 $('cameraSource').onchange=()=>stopCamera();
 $('closeup').onclick=()=>{
@@ -365,15 +371,124 @@ window.addEventListener('resize',refit);if(document.fonts)document.fonts.ready.t
 document.addEventListener('visibilitychange',()=>{gate.reset();if(document.hidden){$('holdProgress').value=0;}else renderTimer();});
 setInterval(()=>{if(!document.hidden)gestureLoop();},150);
 setInterval(()=>{if(timer.tick()){alarm();notice('⏰ 타이머 완료: '+timerSource);save();}renderTimer();},200);
+// Pi voice and typed commands share the same context and action dispatcher.
+function setupPiVoice(){
+ const panel=$('piVoice'), input=$('piCommand'), status=$('piVoiceStatus');
+ panel.hidden=false;
+ let history=[], seen=null, failures=0, polling=false, executing=false;
+ const queue=[];
+ function ownsDisplay(){
+   try{return localStorage.getItem(OWNER_KEY)===deviceOwner;}catch{return !document.hidden;}
+ }
+ function context(){
+   return {stage,ingredients:$('ingredients').value.split(/[,，\n]/).map(x=>x.trim()).filter(Boolean),
+     menus:menus.map(m=>m.name),page};
+ }
+ function describe(){
+   if(stage===4&&recipe)return page? page+'단계 · '+recipe.steps[page-1].instruction:'조리 준비 · '+recipe.title;
+   if(stage===3)return menus.map((m,i)=>(i+1)+'번 '+m.name).join(', ');
+   if(stage===2)return '현재 재료 · '+($('ingredients').value||'입력 전');
+   return '재료를 카메라에 놓고 “재료 찍어 줘”라고 말해 주세요.';
+ }
+ async function apply(result){
+   const a=result.args;
+   if(result.tool==='ask')return result.message;
+   if(result.tool==='describe')return describe();
+   switch(a.action){
+     case 'next': case 'previous': {
+       const target=page+(a.action==='next'?1:-1);
+       if(target<0||target>recipe.steps.length)return target<0?'첫 페이지입니다.':'마지막 조리 단계입니다.';
+       page=target;bookPart=0;prepareStepTimer();renderBook();renderTimer();save();await syncDevice();
+       return describe();
+     }
+     case 'replace': {
+       const items=getIngredients(), i=items.indexOf(a.old);
+       if(i<0)throw Error('재료 목록이 바뀌었습니다. 다시 말해 주세요.');
+       items[i]=a.new;$('ingredients').value=[...new Set(items)].join(', ');
+       $('ingredients').oninput();return a.old+' → '+a.new+' · 수정한 목록을 확인해 주세요.';
+     }
+     case 'capture':
+       if(!stream){$('cameraSource').value='pi';await startCamera();}
+       if(!stream)throw Error('기기 카메라를 먼저 연결해 주세요.');
+       await capture();break;
+     case 'recommend':
+       getIngredients();$('reviewIngredients').checked=true;$('reviewIngredients').onchange();await recommend();break;
+     case 'select': await selectMenu(menus[a.index-1]);break;
+     default: throw Error('지원하지 않는 명령입니다.');
+   }
+   return $('notice').textContent;
+ }
+ async function drain(){
+   if(busy||executing||!queue.length||!ownsDisplay())return;
+   const cmd=queue.shift(), state=context();
+   executing=true;
+   try{
+     status.textContent='기기에서 명령을 해석하고 있습니다…';
+     const result=await request('/api/device/command',{...state,...cmd,history});
+     if(!ownsDisplay()||busy||JSON.stringify(state)!==JSON.stringify(context()))
+       throw Error('화면이 바뀌었습니다. 현재 단계에서 다시 말해 주세요.');
+     const message=await apply(result);
+     status.textContent=message;
+     history=[{role:'user',content:cmd.text},{role:'assistant',content:message.slice(0,300)}];
+   }catch(e){status.textContent=e.message;}
+   finally{executing=false;void drain();}
+ }
+ function enqueue(text,source){
+   text=text.trim();if(!text)return;
+   input.value=text;
+   queue.push({text,source});void drain();
+ }
+ $('piCommandForm').onsubmit=e=>{e.preventDefault();enqueue(input.value,'device');};
+ async function poll(){
+   if(polling||!ownsDisplay()){if(!ownsDisplay()){queue.length=0;seen=null;}return;}
+   polling=true;
+   try{
+     const data=await request('/api/voice-poll');
+     const recovered=failures>=3;
+     failures=0;
+     if(!ownsDisplay())return;
+     if(recovered&&!executing)status.textContent='기기 음성 입력이 다시 연결됐습니다.';
+     if(data.text_only){
+       input.readOnly=true;
+       $('piCommandForm').querySelector('button').hidden=true;
+     }else if(input.readOnly){
+       input.readOnly=false;
+       $('piCommandForm').querySelector('button').hidden=false;
+     }
+     if(seen&&seen.session===data.session&&data.seq>seen.seq&&data.text){
+       if(data.text_only){
+         input.value=data.text;
+         const words=data.text.replace(/[\s.!?,。]+/g,'');
+         const move=words.match(/^(다음|이전)단계(?:로(?:넘어가(?:줘|주세요|지고)?|가(?:줘|주세요)?)?)?$/);
+         if(move&&stage===4&&recipe&&!busy){
+           const action=move[1]==='다음'?'next':'previous';
+           const before=page;
+           const message=await apply({tool:'move',args:{action}});
+           status.textContent=page===before?message:'음성으로 조리 단계를 이동했습니다.';
+         }else{
+           status.textContent=move?'04 요리 시작 화면에서 사용하세요.':'인식된 문장을 받았습니다.';
+         }
+       }else enqueue(data.text,'voice');
+     }
+     seen={session:data.session,seq:data.seq};
+     if(!executing&&data.status!=='준비')status.textContent=data.status;
+     void drain();
+   }catch(e){if(++failures>=3&&!executing)status.textContent=e.message;}
+   finally{polling=false;}
+ }
+ void poll();setInterval(poll,1000);
+}
+
 async function initialize(){
  try{localStorage.setItem(OWNER_KEY,deviceOwner);$('resumeBook').hidden=!localStorage.getItem(STORE);}catch{}
  showStage(1);configureVoice();prepareStepTimer();renderBook();renderMode();syncInputs();renderTimer();setBusy(false);
- try{const health=await request('/api/health');token=health.csrf;demo=health.demo;piConfigured=!!health.device;$('cameraSource').options[1].disabled=!piConfigured;$('modeBadge').textContent=demo?'DEMO · 고정 예시':'LOCAL AI · 내 PC';
+ try{const health=await request('/api/health');token=health.csrf;demo=health.demo;piConfigured=!!health.device;$('cameraSource').options[1].disabled=!piConfigured;$('modeBadge').textContent=demo?'시연 · 고정 예시':'내 컴퓨터에서 실행 중';
+ if(piConfigured)setupPiVoice();
  await syncDevice();
  const missing=Object.entries(health.models).filter(([,value])=>!value.exists).map(([key])=>key);
- notice(demo?'DEMO 모드입니다. 촬영·추천·생성 결과는 고정 예시이며 실제 모델 추론이 아닙니다. 제스처에는 실제 모델이 필요합니다.':missing.length?'모델 파일 확인 필요: '+missing.join(', ')+' · source/README.md를 확인하세요.':'준비되었습니다. 재료를 촬영하거나 직접 입력하세요.',!demo&&missing.length>0);
+ notice(demo?'시연 모드입니다. 촬영·추천·생성 결과는 고정 예시이며 실제 모델 추론이 아닙니다. 제스처에는 실제 모델이 필요합니다.':missing.length?'모델 파일 확인 필요: '+missing.join(', ')+' · source/README.md를 확인하세요.':'준비되었습니다. 재료를 촬영하거나 직접 입력하세요.',!demo&&missing.length>0);
  }catch(e){notice('서버 연결 실패: '+e.message,true);}
 }
-$('resumeBook').onclick=()=>{restore();if(recipe){showStage(4);renderMode();syncInputs();}else notice('이어볼 레시피가 없습니다.');};
+$('resumeBook').onclick=async()=>{if(busy)return;try{await restore();if(recipe){showStage(4);renderMode();syncInputs();save();}else notice('이어볼 레시피가 없습니다.');}catch(e){notice(e.message,true);}};
 setInterval(syncDevice,500);
 initialize();

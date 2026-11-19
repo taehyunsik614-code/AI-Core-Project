@@ -83,7 +83,7 @@ class Frames:
                 raise TimeoutError('Camera unavailable')
             return self.timestamp, self.latest
 
-def handler(frames, outputs):
+def handler(frames, outputs, voice=None, selector=None):
     class Handler(BaseHTTPRequestHandler):
         def reply(self, status, raw, mime):
             self.send_response(status)
@@ -94,6 +94,9 @@ def handler(frames, outputs):
             self.wfile.write(raw)
 
         def do_GET(self):
+            if self.path == '/voice-text':
+                data = dict(voice.snapshot(), text_only=selector is None) if voice else {'error':'Pi 서버를 --voice 옵션으로 실행하세요.'}
+                return self.reply(200 if voice else 503,json.dumps(data).encode(),'application/json')
             if self.path not in ('/frame.jpg','/stream.mjpg'):
                 return self.send_error(404)
             try:
@@ -113,6 +116,16 @@ def handler(frames, outputs):
                 return
 
         def do_POST(self):
+            if self.path == '/llm-infer' and selector:
+                try:
+                    size = int(self.headers.get('Content-Length', 0))
+                    if not 0 < size <= 32768:
+                        raise ValueError('요청 크기 오류')
+                    data = json.loads(self.rfile.read(size))
+                    answer = selector.infer(data)
+                except Exception as exc:
+                    return self.reply(503,json.dumps({'error':'Pi 명령 해석 실패 · '+str(exc)}).encode(),'application/json')
+                return self.reply(200,json.dumps(answer).encode(),'application/json')
             if self.path != '/state':
                 return self.send_error(404)
             try:
@@ -137,7 +150,28 @@ def main():
     from luma.oled import device
     parser = argparse.ArgumentParser()
     parser.add_argument('--oled', choices=['ssd1306','sh1106'],default='ssd1306')
+    root = Path(__file__).resolve().parents[1]
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--voice', action='store_true')
+    modes.add_argument('--voice-text-only', action='store_true')
+    parser.add_argument('--alsa', default='plughw:0,0')
+    parser.add_argument('--whisper', default=str(Path.home()/'whisper.cpp/build/bin/whisper-cli'))
+    parser.add_argument('--stt-model', default=str(Path.home()/'whisper.cpp/models/ggml-base.bin'))
+    parser.add_argument('--tool-model', default=str(root/'models/Qwen3-1.7B-Q4_K_M.gguf'))
     args = parser.parse_args()
+    voice = selector = None
+    if args.voice or args.voice_text_only:
+        from voice_input import VoiceInput
+        paths = [args.whisper, args.stt_model]
+        if args.voice:
+            paths.append(args.tool_model)
+        for path in paths:
+            if not Path(path).is_file():
+                parser.error('파일을 찾을 수 없습니다 · ' + path)
+        voice = VoiceInput(args.alsa, args.whisper, args.stt_model)
+        if args.voice:
+            from voice_llm import ToolSelector
+            selector = ToolSelector(args.tool_model)
     oled = getattr(device,args.oled)(spi(port=0,device=0,gpio_DC=25,gpio_RST=22))
     camera = Picamera2()
     camera.configure(camera.create_video_configuration(main={'size':(1280,720),'format':'RGB888'}))
@@ -146,10 +180,12 @@ def main():
     outputs = Outputs(oled,LED(17),LED(27),canvas)
     outputs.update(state(dict(mode='idle',stage=1,page=0,total=0,seconds=0)))
     threading.Thread(target=frames.capture,daemon=True).start()
-    with ThreadingHTTPServer(('',8080),handler(frames,outputs)) as server:
+    with ThreadingHTTPServer(('',8080),handler(frames,outputs,voice,selector)) as server:
         try:
             server.serve_forever()
         finally:
+            if voice:
+                voice.close()
             camera.stop()
             outputs.running.close()
             outputs.done.close()

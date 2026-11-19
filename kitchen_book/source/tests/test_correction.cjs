@@ -35,7 +35,7 @@ test('fresh visit opens capture and clears a stale OLED step',async()=>{
    piConfigured:false,token:'',sendingState:false,deviceReady:false,lastDeviceState:'',lastSyncTime:0,
    deviceOwner:'current',OWNER_KEY:'owner',STORE:'recipe',demo:false,$:()=>element,
    localStorage:{setItem:(k,v)=>memory.set(k,v),getItem:k=>memory.get(k)},
-   configureVoice(){},prepareStepTimer(){},renderBook(){},renderMode(){},syncInputs(){},renderTimer(){},setBusy(){},notice(){},
+   setupPiVoice(){},configureVoice(){},prepareStepTimer(){},renderBook(){},renderMode(){},syncInputs(){},renderTimer(){},setBusy(){},notice(){},
    showStage:n=>{env.stage=n;},
    request:async(path,payload)=>{if(payload){states.push(JSON.parse(JSON.stringify(payload)));return payload;}return {device:'pi',csrf:'token',demo:false,models:{}};}
  };
