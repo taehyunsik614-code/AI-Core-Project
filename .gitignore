@@ -1,0 +1,6 @@
+
+/kitchen_book/models/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
